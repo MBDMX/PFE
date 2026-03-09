@@ -15,7 +15,7 @@ services:
       - backend
     restart: unless-stopped
 
-  # ── Backend (Express) ────────────────────────────────
+  # ── Backend (FastAPI - Python) ─────────────────────────
   backend:
     build:
       context: ./backend
@@ -24,6 +24,6 @@ services:
     ports:
       - "4000:4000"
     environment:
-      - NODE_ENV=production
-      - PORT=4000
+      - DATABASE_URL=sqlite:///./gmao.db
+      - SECRET_KEY=votre_cle_secrete_super_secure
     restart: unless-stopped
