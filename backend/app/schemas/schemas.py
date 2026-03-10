@@ -1,33 +1,37 @@
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
 from typing import List, Optional
 
 class UserLogin(BaseModel):
-    username: str
+    identifier: str = Field(..., description="Username or Email")
     password: str
     role: str
 
 class UserCreate(BaseModel):
-    username: str
-    password: str
+    username: str = Field(..., min_length=3, max_length=50, pattern="^[a-zA-Z0-9_-]+$")
+    email: EmailStr
+    password: str = Field(..., min_length=8)
     role: str
     name: str
 
 class UserOut(BaseModel):
     id: int
     username: str
+    email: str
     role: str
     name: str
     model_config = ConfigDict(from_attributes=True)
 
 class Token(BaseModel):
-    token: str
+    access_token: str
+    refresh_token: str
+    token_type: str = "bearer"
     user: UserOut
+
+class TokenRefreshRequest(BaseModel):
+    refresh_token: str
 
 class MachineBase(BaseModel):
     name: str; reference: str; location: str; status: str; health_score: int
-
-class MachineCreate(MachineBase):
-    pass
 
 class Machine(MachineBase):
     id: int

@@ -16,15 +16,33 @@ def get_current_user(db: Session = Depends(get_db), token: str = Depends(oauth2_
     )
     try:
         payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
+        if payload.get("type") != "access":
+            raise credentials_exception
         sub: str = payload.get("sub")
         if sub is None:
             raise credentials_exception
-        # Sub format was set as "username:role" in login
-        username = sub.split(":")[0]
     except JWTError:
         raise credentials_exception
         
-    user = db.query(User).filter(User.username == username).first()
+    user = db.query(User).filter(User.username == sub).first()
     if user is None:
         raise credentials_exception
     return user
+
+def admin_required(current_user: User = Depends(get_current_user)):
+    if current_user.role != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Seul un administrateur peut effectuer cette action"
+        )
+    return current_user
+
+def role_required(allowed_roles: list):
+    def dependency(current_user: User = Depends(get_current_user)):
+        if current_user.role not in allowed_roles:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Accès refusé pour le rôle {current_user.role}"
+            )
+        return current_user
+    return dependency

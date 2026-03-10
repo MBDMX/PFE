@@ -8,7 +8,7 @@ from app.core.security import get_password_hash
 # Initialize Database
 Base.metadata.create_all(bind=engine)
 
-app = FastAPI(title="GMAO PRO API")
+app = FastAPI(title="GMAO PRO API", version="1.1.0")
 
 # Setup CORS
 app.add_middleware(
@@ -19,15 +19,15 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Seed Data (Simple on_event for MVP brevity as requested)
 @app.on_event("startup")
 def seed_data():
     db = SessionLocal()
     if db.query(User).count() == 0:
+        # Seeding with Emails for the new auth system
         db.add_all([
-            User(username="admin", password_hash=get_password_hash("admin123"), role="admin", name="Admin Principal"),
-            User(username="manager", password_hash=get_password_hash("mgr123"), role="manager", name="Chef Maintenance"),
-            User(username="tech1", password_hash=get_password_hash("tech123"), role="technician", name="Technicien #1"),
+            User(username="admin", email="admin@gmao-pro.com", password_hash=get_password_hash("admin123"), role="admin", name="Admin Principal"),
+            User(username="manager", email="manager@gmao-pro.com", password_hash=get_password_hash("mgr123"), role="manager", name="Chef Maintenance"),
+            User(username="tech1", email="tech1@gmao-pro.com", password_hash=get_password_hash("tech123"), role="technician", name="Technicien #1"),
         ])
         db.add_all([
             Machine(name="Compresseur A1", reference="COMP-001", location="Atelier Nord", status="operational", health_score=85),
