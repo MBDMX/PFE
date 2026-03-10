@@ -6,9 +6,22 @@ class UserLogin(BaseModel):
     password: str
     role: str
 
+class UserCreate(BaseModel):
+    username: str
+    password: str
+    role: str
+    name: str
+
+class UserOut(BaseModel):
+    id: int
+    username: str
+    role: str
+    name: str
+    model_config = ConfigDict(from_attributes=True)
+
 class Token(BaseModel):
     token: str
-    user: dict
+    user: UserOut
 
 class MachineBase(BaseModel):
     name: str; reference: str; location: str; status: str; health_score: int
