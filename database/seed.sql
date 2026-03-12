@@ -1,9 +1,9 @@
 -- Seed Data
 
-INSERT INTO users (username, password, role, name) VALUES
-('admin', '$2a$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', 'admin', 'Admin Principal'),
-('manager', '$2a$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', 'manager', 'Chef Maintenance'),
-('tech1', '$2a$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', 'technician', 'Technicien #1');
+INSERT INTO users (username, email, password, role, name) VALUES
+('admin', 'admin@gmao-pro.com', '$2a$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', 'admin', 'Admin Principal'),
+('manager', 'manager@gmao-pro.com', '$2a$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', 'manager', 'Chef Maintenance'),
+('tech1', 'tech1@gmao-pro.com', '$2a$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', 'technician', 'Technicien #1');
 
 INSERT INTO machines (name, reference, location, status, health_score, last_maintenance) VALUES
 ('Compresseur A1', 'COMP-001', 'Atelier Nord', 'operational', 85, '2026-02-10'),
