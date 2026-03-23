@@ -4,7 +4,6 @@ from typing import List, Optional
 class UserLogin(BaseModel):
     identifier: str = Field(..., description="Username or Email")
     password: str
-    role: str
 
 class UserCreate(BaseModel):
     username: str = Field(..., min_length=3, max_length=50, pattern="^[a-zA-Z0-9_-]+$")
@@ -38,10 +37,47 @@ class Machine(MachineBase):
     model_config = ConfigDict(from_attributes=True)
 
 class StockBase(BaseModel):
-    name: str; reference: str; quantity: int; min_quantity: int; unit: str
+    name: str; reference: str; quantity: int; unit: str; location: str; image: Optional[str] = None; synonyms: Optional[str] = None
 
 class Stock(StockBase):
     id: int
+    model_config = ConfigDict(from_attributes=True)
+
+class WorkOrderPart(BaseModel):
+    id: int
+    work_order_id: int
+    part_code: str
+    part_name: str
+    quantity: int
+    model_config = ConfigDict(from_attributes=True)
+
+class WorkOrder(BaseModel):
+    id: int
+    sap_order_id: Optional[str] = None
+    title: str
+    description: Optional[str] = None
+    type: str
+    priority: str
+    status: str
+    technical_location: Optional[str] = None
+    equipment_id: Optional[str] = None
+    serial_number: Optional[str] = None
+    team: Optional[str] = None
+    responsible_person: Optional[str] = None
+    technician_id: Optional[int] = None
+    planned_start_date: Optional[str] = None
+    planned_end_date: Optional[str] = None
+    actual_start_date: Optional[str] = None
+    actual_end_date: Optional[str] = None
+    time_spent: Optional[float] = None
+    work_log: Optional[str] = None
+    failure_cause: Optional[str] = None
+    solution_applied: Optional[str] = None
+    comments: Optional[str] = None
+    created_by: Optional[int] = None
+    
+    parts: Optional[List[WorkOrderPart]] = []
+    
     model_config = ConfigDict(from_attributes=True)
 
 class Stats(BaseModel):
@@ -49,3 +85,4 @@ class Stats(BaseModel):
     operational: int
     openOrders: int
     lowStock: int
+    totalTechnicians: int

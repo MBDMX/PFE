@@ -23,14 +23,38 @@ CREATE TABLE machines (
 
 CREATE TABLE work_orders (
   id INT PRIMARY KEY AUTO_INCREMENT,
-  title VARCHAR(200) NOT NULL,
-  machine_id INT REFERENCES machines(id),
-  assigned_to INT REFERENCES users(id),
-  priority ENUM('low','medium','high','critical') DEFAULT 'medium',
-  status ENUM('pending','in_progress','done','cancelled') DEFAULT 'pending',
+  sap_order_id VARCHAR(50),
+  title VARCHAR(255) NOT NULL,
   description TEXT,
-  due_date DATE,
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  type VARCHAR(50) DEFAULT 'corrective',
+  priority VARCHAR(20) DEFAULT 'medium',
+  status VARCHAR(20) DEFAULT 'OPEN',
+  technical_location VARCHAR(100),
+  equipment_id VARCHAR(50),
+  serial_number VARCHAR(100),
+  team VARCHAR(100),
+  responsible_person VARCHAR(100),
+  technician_id INT REFERENCES users(id),
+  planned_start_date DATE,
+  planned_end_date DATE,
+  actual_start_date DATE,
+  actual_end_date DATE,
+  time_spent FLOAT,
+  work_log TEXT,
+  failure_cause TEXT,
+  solution_applied TEXT,
+  comments TEXT,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  created_by INT REFERENCES users(id)
+);
+
+CREATE TABLE work_order_parts (
+  id INT PRIMARY KEY AUTO_INCREMENT,
+  work_order_id INT REFERENCES work_orders(id),
+  part_code VARCHAR(50),
+  part_name VARCHAR(255),
+  quantity INT DEFAULT 1
 );
 
 CREATE TABLE stock_items (
@@ -38,8 +62,9 @@ CREATE TABLE stock_items (
   name VARCHAR(100) NOT NULL,
   reference VARCHAR(50),
   quantity INT DEFAULT 0,
-  min_quantity INT DEFAULT 5,
   unit VARCHAR(20),
   location VARCHAR(50),
+  image VARCHAR(255),
+  synonyms TEXT,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );

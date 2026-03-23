@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.api import auth, gmao
 from app.db.session import engine, Base, SessionLocal
-from app.models.models import User, Machine, Stock
+from app.models.models import User, Machine, Stock, WorkOrder, WorkOrderPart
 from app.core.security import get_password_hash
 
 # Initialize Database
@@ -36,7 +36,25 @@ def seed_data():
             Machine(name="Presse Hydraulique P5", reference="PH-005", location="Atelier Est", status="breakdown", health_score=15),
         ])
         db.add_all([
-            Stock(name="Filtre à huile", reference="FH-100", quantity=12, min_quantity=5, unit="unité"),
+            Stock(name="Courroie trapézoïdale B47", reference="CT-B47", quantity=12, unit="unité", location="Rayon A1", image="/pieces/courroie.png", synonyms="belt, bande, courroie moteur, trapeze belt"),
+            Stock(name="Roulement à billes SKF 6205", reference="SKF-6205", quantity=8, unit="unité", location="Rayon B2", image="/pieces/roulement.png", synonyms="bearing, palier, roulement moteur, ball bearing"),
+            Stock(name="Filtre à huile hydraulique", reference="FH-HYD-100", quantity=25, unit="unité", location="Rayon C1", image="/pieces/filtre.png", synonyms="oil filter, filtre, cartouche huile, hydraulic filter"),
+            Stock(name="Joint torique NBR 50x3mm", reference="JT-NBR-50", quantity=150, unit="unité", location="Rayon A3", image="/pieces/joint.png", synonyms="o-ring, joint caoutchouc, seal, bague étanchéité"),
+            Stock(name="Vérin pneumatique FESTO", reference="VP-FESTO-32", quantity=4, unit="unité", location="Rayon D1", image="", synonyms="cylinder, piston, vérin air, pneumatic actuator"),
+            Stock(name="Graisse industrielle Mobilux", reference="GR-MOB-EP2", quantity=18, unit="kg", location="Rayon C3", image="", synonyms="grease, lubrifiant, graissage, lubrication"),
+            Stock(name="Capteur inductif M12 PNP", reference="CI-M12-PNP", quantity=15, unit="unité", location="Rayon E2", image="", synonyms="sensor, détecteur, proximity, capteur approche"),
+            Stock(name="Relais thermique Schneider", reference="RT-SCH-6A", quantity=6, unit="unité", location="Rayon E1", image="", synonyms="thermal relay, protection moteur, overload, disjoncteur thermique"),
+        ])
+        db.add_all([
+            WorkOrder(sap_order_id="SAP-WO-1052", title="Vidange compresseur", description="Effectuer vidange préventive", type="preventive", priority="medium", status="OPEN", technical_location="Atelier Nord", equipment_id="COMP-001", team="Maint-Meca", technician_id=3, planned_start_date="2026-03-10", planned_end_date="2026-03-10"),
+            WorkOrder(sap_order_id="SAP-WO-1053", title="Remplacement courroie", description="Courroie de transmission usée", type="corrective", priority="high", status="IN_PROGRESS", technical_location="Atelier Sud", equipment_id="TCN-200", team="Maint-Meca", technician_id=3, planned_start_date="2026-03-07", planned_end_date="2026-03-08"),
+            WorkOrder(sap_order_id="SAP-WO-1054", title="Inspection convoyeur", description="Contrôle périodique mensuel", type="preventive", priority="low", status="DONE", technical_location="Ligne B", equipment_id="CONV-003", team="Maint-Elec", technician_id=3, planned_start_date="2026-02-28", planned_end_date="2026-02-28"),
+            WorkOrder(sap_order_id="SAP-WO-1055", title="Réparation presse", description="Panne hydraulique urgente", type="corrective", priority="high", status="OPEN", technical_location="Atelier Est", equipment_id="PH-005", team="Maint-Hydrique", technician_id=3, planned_start_date="2026-03-06", planned_end_date="2026-03-07")
+        ])
+        db.add_all([
+            WorkOrderPart(work_order_id=2, part_code="CT-B47", part_name="Courroie trapézoïdale B47", quantity=1),
+            WorkOrderPart(work_order_id=1, part_code="FH-HYD-100", part_name="Filtre à huile hydraulique", quantity=2),
+            WorkOrderPart(work_order_id=4, part_code="JT-NBR-50", part_name="Joint torique NBR 50x3mm", quantity=4)
         ])
         db.commit()
     db.close()

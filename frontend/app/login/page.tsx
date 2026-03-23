@@ -2,201 +2,191 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { Shield, User, Lock, Wrench, ArrowRight, Eye, EyeOff, Sparkles } from 'lucide-react';
+import { User, Lock, Wrench, ArrowRight, Eye, EyeOff } from 'lucide-react';
+import api from '@/services/api';
 
-const USERS = [
-  { username: 'admin', password: 'admin123', role: 'admin', name: 'Admin Principal' },
-  { username: 'manager', password: 'mgr123', role: 'manager', name: 'Chef Maintenance' },
-  { username: 'tech1', password: 'tech123', role: 'technician', name: 'Technicien #1' },
-];
-
-const ROLES = [
-  {
-    key: 'admin',
-    label: 'Admin',
-    icon: Shield,
-    color: 'from-blue-600 to-indigo-700',
-    border: 'border-blue-500/50',
-  },
-  {
-    key: 'technician',
-    label: 'Technicien',
-    icon: Wrench,
-    color: 'from-blue-500 to-cyan-600',
-    border: 'border-blue-400/50',
-  },
-  {
-    key: 'manager',
-    label: 'Responsable',
-    icon: User,
-    color: 'from-blue-700 to-blue-900',
-    border: 'border-blue-600/50',
-  },
-];
+// Role → dashboard route map (read-only, never user-controlled)
+const ROLE_ROUTES: Record<string, string> = {
+  admin: '/dashboard/admin',
+  technician: '/dashboard/technician',
+  manager: '/dashboard/manager',
+};
 
 export default function LoginPage() {
-  const [role, setRole] = useState('');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
 
   const router = useRouter();
   const usernameRef = useRef<HTMLInputElement>(null);
 
+  // Redirect if already authenticated
   useEffect(() => {
-    if (usernameRef.current) {
-      usernameRef.current.focus();
-    }
+    usernameRef.current?.focus();
+    const token = localStorage.getItem('token');
+    if (!token) return;
+    try {
+      const payload = JSON.parse(
+        window.atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))
+      );
+      const route = ROLE_ROUTES[payload.role];
+      if (route) router.replace(route);
+    } catch { }
   }, []);
 
-  const ready = role && username && password;
+  const ready = username.trim().length > 0 && password.length > 0;
 
-  function handleLogin() {
-    const user = USERS.find(u => u.username === username && u.password === password && u.role === role);
-    if (!user) {
-      setError('AUTH_ERR: Identifiants invalides.');
-      return;
+  async function handleLogin() {
+    if (!ready || loading) return;
+    setLoading(true);
+    setError('');
+    try {
+      const res = await api.post('/auth/login', { identifier: username, password });
+      const { access_token, refresh_token } = res.data;
+
+      // Store tokens only — never store role in localStorage
+      localStorage.setItem('token', access_token);
+      if (refresh_token) localStorage.setItem('refresh_token', refresh_token);
+
+      // Decode role from JWT (backend is the source of truth)
+      const payload = JSON.parse(
+        window.atob(access_token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))
+      );
+      const route = ROLE_ROUTES[payload.role];
+      if (!route) throw new Error('Rôle inconnu');
+      router.replace(route);
+    } catch (err: any) {
+      let msg = err.response?.data?.detail;
+      if (Array.isArray(msg)) msg = msg[0]?.msg;
+      
+      setError(
+        msg === 'Invalid credentials' || msg === 'Identifiants incorrects'
+          ? 'Identifiant ou mot de passe incorrect.'
+          : (typeof msg === 'string' ? msg : 'Erreur de connexion au serveur.')
+      );
+    } finally {
+      setLoading(false);
     }
-    localStorage.setItem('user', JSON.stringify(user));
-    router.push(`/dashboard/${user.role}`);
   }
 
   return (
-    /* 🌌 Beautiful Professional Blue Background 🌌 */
-    <div className="relative min-h-screen w-full flex flex-col justify-center items-center overflow-x-hidden overflow-y-auto bg-[#0f172a] bg-gradient-to-br from-[#0f172a] via-[#1e293b] to-[#0f172a] py-10 sm:py-0" style={{ fontFamily: 'var(--font-outfit), sans-serif' }}>
-      
-      {/* Decorative Glow Elements */}
-      <div className="absolute top-[-10%] left-[-5%] w-[100%] sm:w-[60%] h-[60%] bg-blue-500/10 rounded-full blur-[120px] animate-pulse"></div>
-      <div className="absolute bottom-[-10%] right-[-5%] w-[100%] sm:w-[50%] h-[50%] bg-blue-400/10 rounded-full blur-[100px] animate-pulse" style={{ animationDelay: '3s' }}></div>
+    <div
+      className="relative min-h-screen w-full flex flex-col justify-center items-center overflow-hidden bg-[#0f172a]"
+      style={{ fontFamily: 'var(--font-outfit), sans-serif' }}
+    >
+      {/* Ambient glows */}
+      <div className="absolute top-[-10%] left-[-5%] w-[70%] h-[60%] bg-blue-500/10 rounded-full blur-[120px] animate-pulse pointer-events-none" />
+      <div className="absolute bottom-[-10%] right-[-5%] w-[60%] h-[50%] bg-blue-400/10 rounded-full blur-[100px] animate-pulse pointer-events-none" style={{ animationDelay: '3s' }} />
 
-      {/* 🧊 Beautiful Dark Blue Card (Lighter) with White Border 🧊 */}
-      <div className="relative z-10 w-full max-w-[90%] sm:max-w-[480px] md:max-w-[500px] p-6 sm:p-10 md:p-12
-                      bg-[#112240] rounded-[1.5rem] sm:rounded-[2.5rem] 
-                      border-2 border-white/90 shadow-[0_40px_100px_-20px_rgba(0,0,0,0.6)] transition-all duration-700">
-        
-        {/* Header Section */}
-        <div className="text-center mb-8 sm:mb-10">
-          <div className="inline-flex relative mb-6 sm:mb-8 group">
-             <div className="absolute inset-0 bg-blue-500/30 blur-3xl rounded-full"></div>
-             <div className="relative flex items-center justify-center w-16 h-16 sm:w-20 sm:h-20 rounded-[1.2rem] sm:rounded-[1.8rem] bg-white/5 border border-white/20 shadow-xl">
-                <Wrench className="w-8 h-8 sm:w-10 sm:h-10 text-blue-300 drop-shadow-[0_0_10px_rgba(147,197,253,0.8)]" />
-             </div>
-          </div>
-          <h1 className="text-3xl sm:text-4xl md:text-5xl font-black text-white tracking-tighter flex justify-center items-center gap-2">
-            GMAO<span className="text-blue-400">PRO</span>
-          </h1>
-          <p className="text-blue-300/40 text-[9px] sm:text-[11px] font-bold tracking-[0.4em] sm:tracking-[0.5em] mt-3 uppercase">Excellence Azure</p>
-        </div>
+      {/* Card */}
+      <div className="relative z-10 w-full max-w-[90%] sm:max-w-[480px] p-8 sm:p-12
+                      bg-[#112240] rounded-[2rem]
+                      border-2 border-white/90
+                      shadow-[0_40px_100px_-20px_rgba(0,0,0,0.6)]">
 
-        <div className="space-y-6 sm:space-y-10">
-          
-          {/* 🎲 Role Selection 🎲 */}
-          <div>
-            <div className="grid grid-cols-3 gap-3 sm:gap-5">
-              {ROLES.map(({ key, label, icon: Icon, border }) => {
-                const isSelected = role === key;
-                return (
-                  <button 
-                    key={key} 
-                    onClick={() => setRole(key)}
-                    className={`
-                      relative group flex flex-col items-center justify-center gap-2 sm:gap-3 py-4 sm:py-6 rounded-[1.2rem] sm:rounded-[2rem] transition-all duration-500
-                      ${isSelected 
-                        ? `bg-white/10 ${border} border-2 text-white shadow-[0_10px_20px_-5px_rgba(59,130,246,0.3)] translate-y-0.5 scale-95` 
-                        : `bg-white/5 border border-white/5 text-slate-400 hover:border-blue-300/60 hover:text-white sm:hover:-translate-y-1.5`
-                      }
-                    `}
-                  >
-                    <Icon className={`w-5 h-5 sm:w-6 sm:h-6 md:w-7 md:h-7 relative z-10 transition-transform ${isSelected ? 'scale-110 drop-shadow-[0_0_10px_white]' : 'group-hover:scale-110'}`} />
-                    <span className="relative z-10 text-[7px] sm:text-[10px] font-black uppercase tracking-wider leading-none">{label}</span>
-                  </button>
-                );
-              })}
+        {/* Header */}
+        <div className="text-center mb-10">
+          <div className="inline-flex relative mb-6">
+            <div className="absolute inset-0 bg-blue-500/30 blur-3xl rounded-full" />
+            <div className="relative flex items-center justify-center w-18 h-18 sm:w-20 sm:h-20 rounded-[1.8rem] bg-white/5 border border-white/20 shadow-xl p-5">
+              <Wrench className="w-9 h-9 text-blue-300 drop-shadow-[0_0_10px_rgba(147,197,253,0.8)]" />
             </div>
           </div>
+          <h1 className="text-4xl sm:text-5xl font-black text-white tracking-tighter">
+            GMAO<span className="text-blue-400">PRO</span>
+          </h1>
+          <p className="text-blue-300/40 text-[10px] font-bold tracking-[0.5em] mt-3 uppercase">
+            Excellence Azure
+          </p>
+        </div>
 
-          {/* 🔑 Inputs: Clear Case Identification */}
-          <div className="space-y-4 sm:space-y-5">
-             <div className="group relative">
-               <input 
-                 ref={usernameRef}
-                 type="text" 
-                 placeholder="Identifiant"
-                 className="w-full pl-5 sm:pl-6 pr-12 sm:pr-14 py-4 sm:py-5 bg-white/5 border border-white/10 rounded-xl sm:rounded-2xl outline-none focus:border-blue-300/60 focus:bg-white/10 transition-all font-medium text-white placeholder-white/60 shadow-inner text-sm sm:text-base"
-                 style={{ fontVariant: 'normal', textTransform: 'none' }}
-                 value={username} onChange={e => setUsername(e.target.value)} 
-               />
-               <User size={18} className="absolute right-5 sm:right-6 top-1/2 -translate-y-1/2 text-white/60 group-focus-within:text-blue-300 transition-colors" />
-             </div>
-             
-             <div className="group relative">
-               <input 
-                 type={showPassword ? "text" : "password"} 
-                 placeholder="Mot de passe"
-                 className="w-full pl-5 sm:pl-6 pr-12 sm:pr-14 py-4 sm:py-5 bg-white/5 border border-white/10 rounded-xl sm:rounded-2xl outline-none focus:border-blue-300/60 focus:bg-white/10 transition-all font-medium text-white placeholder-white/60 shadow-inner text-sm sm:text-base"
-                 style={{ fontVariant: 'normal', textTransform: 'none' }}
-                 value={password} onChange={e => setPassword(e.target.value)} 
-                 onKeyDown={e => e.key === 'Enter' && ready && handleLogin()}
-               />
-               <button 
-                type="button" 
-                onClick={() => setShowPassword(!showPassword)}
-                className="absolute right-5 sm:right-6 top-1/2 -translate-y-1/2 text-white/60 hover:text-blue-300 group-focus-within:text-blue-300 transition-colors z-10"
-               >
-                 {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
-               </button>
-             </div>
-             
-             <div className="flex justify-end px-1">
-               <button 
-                className="text-[10px] sm:text-[11px] font-bold text-blue-300/50 hover:text-blue-300 transition-colors tracking-widest uppercase hover:underline"
-                onClick={() => alert('Contactez l\'administrateur.')}
-               >
-                 Mot de passe oublié ?
-               </button>
-             </div>
+        {/* Form */}
+        <div className="space-y-5">
+
+          {/* Username */}
+          <div className="group relative">
+            <input
+              ref={usernameRef}
+              type="text"
+              placeholder="Identifiant"
+              autoComplete="username"
+              className="w-full pl-6 pr-14 py-4 sm:py-5 bg-white/5 border border-white/10 rounded-2xl outline-none focus:border-blue-300/60 focus:bg-white/10 transition-all font-medium text-white placeholder-white/40 text-sm sm:text-base"
+              value={username}
+              onChange={e => { setUsername(e.target.value); setError(''); }}
+              onKeyDown={e => e.key === 'Enter' && usernameRef.current?.nextElementSibling && (usernameRef.current.nextElementSibling as HTMLElement)?.focus?.()}
+            />
+            <User size={18} className="absolute right-5 top-1/2 -translate-y-1/2 text-white/40 group-focus-within:text-blue-300 transition-colors pointer-events-none" />
           </div>
 
+          {/* Password */}
+          <div className="group relative">
+            <input
+              type={showPassword ? 'text' : 'password'}
+              placeholder="Mot de passe"
+              autoComplete="current-password"
+              className="w-full pl-6 pr-14 py-4 sm:py-5 bg-white/5 border border-white/10 rounded-2xl outline-none focus:border-blue-300/60 focus:bg-white/10 transition-all font-medium text-white placeholder-white/40 text-sm sm:text-base"
+              value={password}
+              onChange={e => { setPassword(e.target.value); setError(''); }}
+              onKeyDown={e => e.key === 'Enter' && handleLogin()}
+            />
+            <button
+              type="button"
+              onClick={() => setShowPassword(p => !p)}
+              className="absolute right-5 top-1/2 -translate-y-1/2 text-white/40 hover:text-blue-300 transition-colors"
+              tabIndex={-1}
+            >
+              {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+            </button>
+          </div>
+
+          {/* Forgot password */}
+          <div className="flex justify-end">
+            <button
+              type="button"
+              className="text-[10px] font-bold text-blue-300/40 hover:text-blue-300 transition-colors tracking-widest uppercase hover:underline"
+              onClick={() => setError('Contactez votre administrateur système.')}
+            >
+              Mot de passe oublié ?
+            </button>
+          </div>
+
+          {/* Error */}
           {error && (
-            <div className="bg-red-500/10 text-red-300 p-3 sm:p-4 rounded-xl sm:rounded-2xl text-center text-[9px] sm:text-[10px] font-black tracking-widest uppercase border border-red-500/20">
+            <div className="bg-red-500/10 text-red-300 px-4 py-3 rounded-2xl text-center text-[10px] font-black tracking-widest uppercase border border-red-500/20 animate-in fade-in duration-300">
               {error}
             </div>
           )}
 
-          {/* 🚀 LIGHT & BEAUTIFUL BUTTON (No Hover Action) 🚀 */}
+          {/* Submit */}
           <div className="relative pt-2">
-            {/* Luminous Glow when Ready */}
-            <div className={`absolute inset-0 bg-blue-400/30 blur-2xl rounded-full scale-90 transition-opacity duration-700 ${ready ? 'opacity-100' : 'opacity-0'}`}></div>
-            
-            <button 
-              onClick={handleLogin} 
-              disabled={!ready}
+            <div className={`absolute inset-0 bg-blue-400/30 blur-2xl rounded-full scale-90 transition-opacity duration-700 ${ready ? 'opacity-100' : 'opacity-0'}`} />
+            <button
+              onClick={handleLogin}
+              disabled={!ready || loading}
               className={`
-                w-full relative flex items-center justify-center gap-3 sm:gap-4 py-4 sm:py-6 rounded-[1.5rem] sm:rounded-[2.5rem] font-black text-sm sm:text-base tracking-[0.2em] uppercase transition-all duration-500
-                ${ready 
-                  ? 'bg-gradient-to-r from-blue-400 to-cyan-300 text-blue-950 shadow-[0_20px_40px_-10px_rgba(59,130,246,0.6)] active:translate-y-[4px] cursor-pointer' 
-                  : 'bg-white/10 text-white/60 border border-white/20 cursor-not-allowed shadow-inner'
+                w-full relative flex items-center justify-center gap-3 py-5 rounded-[2rem]
+                font-black text-sm tracking-[0.2em] uppercase transition-all duration-500
+                ${ready && !loading
+                  ? 'bg-gradient-to-r from-blue-400 to-cyan-300 text-blue-950 shadow-[0_20px_40px_-10px_rgba(59,130,246,0.6)] active:translate-y-1 cursor-pointer'
+                  : 'bg-white/10 text-white/40 border border-white/10 cursor-not-allowed'
                 }
               `}
             >
-              <span className={`relative z-10 flex items-center gap-2 sm:gap-3`}>
-                SE CONNECTER
-              </span>
-              <ArrowRight size={20} className="sm:size-6 relative z-10" />
+              {loading ? (
+                <span className="flex items-center gap-2">
+                  <span className="size-4 border-2 border-blue-950/40 border-t-blue-950 rounded-full animate-spin" />
+                  Connexion...
+                </span>
+              ) : (
+                <>Se connecter <ArrowRight size={18} /></>
+              )}
             </button>
           </div>
-          
+
         </div>
       </div>
-
-      <style dangerouslySetInnerHTML={{
-        __html: `
-        @keyframes shimmer {
-          0% { transform: translateX(-150%) skewX(-20deg); }
-          100% { transform: translateX(250%) skewX(-20deg); }
-        }
-      `}} />
     </div>
   );
 }

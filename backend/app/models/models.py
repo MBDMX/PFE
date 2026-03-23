@@ -1,4 +1,5 @@
-from sqlalchemy import Column, Integer, String
+from sqlalchemy import Column, Integer, String, Float, Text, ForeignKey
+from sqlalchemy.orm import relationship
 from app.db.session import Base
 
 class User(Base):
@@ -22,18 +23,48 @@ class Machine(Base):
 class WorkOrder(Base):
     __tablename__ = "work_orders"
     id = Column(Integer, primary_key=True, index=True)
+    sap_order_id = Column(String)
     title = Column(String)
-    machine_id = Column(Integer)
-    assigned_to = Column(Integer)
+    description = Column(Text)
+    type = Column(String)
     priority = Column(String)
     status = Column(String)
-    due_date = Column(String)
+    technical_location = Column(String)
+    equipment_id = Column(String)
+    serial_number = Column(String)
+    team = Column(String)
+    responsible_person = Column(String)
+    technician_id = Column(Integer)
+    planned_start_date = Column(String)
+    planned_end_date = Column(String)
+    actual_start_date = Column(String)
+    actual_end_date = Column(String)
+    time_spent = Column(Float)
+    work_log = Column(Text)
+    failure_cause = Column(Text)
+    solution_applied = Column(Text)
+    comments = Column(Text)
+    created_by = Column(Integer)
+    
+    parts = relationship("WorkOrderPart", back_populates="work_order")
+
+class WorkOrderPart(Base):
+    __tablename__ = "work_order_parts"
+    id = Column(Integer, primary_key=True, index=True)
+    work_order_id = Column(Integer, ForeignKey("work_orders.id"))
+    part_code = Column(String)
+    part_name = Column(String)
+    quantity = Column(Integer)
+    
+    work_order = relationship("WorkOrder", back_populates="parts")
 
 class Stock(Base):
-    __tablename__ = "stock"
+    __tablename__ = "stock_items"
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String)
     reference = Column(String)
     quantity = Column(Integer)
-    min_quantity = Column(Integer)
     unit = Column(String)
+    location = Column(String)
+    image = Column(String)
+    synonyms = Column(String)
