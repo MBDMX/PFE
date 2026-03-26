@@ -20,7 +20,7 @@ import {
 import api from '@/services/api';
 
 type Priority = 'low' | 'medium' | 'high' | 'critical';
-type WOStatus = 'OPEN' | 'IN_PROGRESS' | 'DONE' | 'CLOSED';
+type WOStatus = 'open' | 'in_progress' | 'done' | 'closed';
 type WorkOrder = { 
   id: number; 
   sap_order_id: string;
@@ -64,11 +64,11 @@ export default function WorkOrdersPage() {
 
     const getStatusStyle = (status: WOStatus) => {
         switch(status) {
-            case 'OPEN': return { label: 'Ouvert', color: 'text-amber-400', bg: 'bg-amber-400/10', icon: Clock };
-            case 'IN_PROGRESS': return { label: 'En Cours', color: 'text-blue-400', bg: 'bg-blue-400/10', icon: Activity };
-            case 'DONE': return { label: 'Terminé', color: 'text-emerald-400', bg: 'bg-emerald-400/10', icon: CheckCircle };
-            case 'CLOSED': return { label: 'Clôturé', color: 'text-slate-500', bg: 'bg-slate-500/10', icon: X };
-            default: return { label: status || 'Inconnu', color: 'text-slate-400', bg: 'bg-slate-400/10', icon: AlertTriangle };
+            case 'open':        return { label: 'Ouvert',    color: 'text-amber-400',   bg: 'bg-amber-400/10',   icon: Clock };
+            case 'in_progress': return { label: 'En cours',  color: 'text-blue-400',    bg: 'bg-blue-400/10',    icon: Activity };
+            case 'done':        return { label: 'Terminé',   color: 'text-emerald-400', bg: 'bg-emerald-400/10', icon: CheckCircle };
+            case 'closed':      return { label: 'Clôturé',   color: 'text-slate-500',   bg: 'bg-slate-500/10',   icon: X };
+            default:            return { label: 'Inconnu',   color: 'text-slate-400',   bg: 'bg-slate-400/10',   icon: AlertTriangle };
         }
     };
 
@@ -101,15 +101,15 @@ export default function WorkOrdersPage() {
             <div className="flex flex-wrap gap-4 mb-8">
                 <div className="azure-card flex-1 py-4 px-6 flex items-center gap-4 bg-amber-500/5 border-amber-500/20">
                     <div className="size-10 rounded-xl bg-amber-500/10 flex items-center justify-center text-amber-500"><Clock size={20}/></div>
-                    <div><div className="text-xl font-black">{orders.filter(o => o.status === 'OPEN').length}</div><div className="text-[0.65rem] font-bold text-slate-500 uppercase tracking-widest">En Attente</div></div>
+                    <div><div className="text-xl font-black">{orders.filter(o => o.status === 'open').length}</div><div className="text-[0.65rem] font-bold text-slate-500 uppercase tracking-widest">En Attente</div></div>
                 </div>
                 <div className="azure-card flex-1 py-4 px-6 flex items-center gap-4 bg-blue-500/5 border-blue-500/20">
                     <div className="size-10 rounded-xl bg-blue-500/10 flex items-center justify-center text-blue-500"><Activity size={20}/></div>
-                    <div><div className="text-xl font-black">{orders.filter(o => o.status === 'IN_PROGRESS').length}</div><div className="text-[0.65rem] font-bold text-slate-500 uppercase tracking-widest">En Cours</div></div>
+                    <div><div className="text-xl font-black">{orders.filter(o => o.status === 'in_progress').length}</div><div className="text-[0.65rem] font-bold text-slate-500 uppercase tracking-widest">En Cours</div></div>
                 </div>
                 <div className="azure-card flex-1 py-4 px-6 flex items-center gap-4 bg-emerald-500/5 border-emerald-500/20">
                     <div className="size-10 rounded-xl bg-emerald-500/10 flex items-center justify-center text-emerald-500"><CheckCircle size={20}/></div>
-                    <div><div className="text-xl font-black">{orders.filter(o => o.status === 'DONE').length}</div><div className="text-[0.65rem] font-bold text-slate-500 uppercase tracking-widest">Terminés</div></div>
+                    <div><div className="text-xl font-black">{orders.filter(o => o.status === 'done').length}</div><div className="text-[0.65rem] font-bold text-slate-500 uppercase tracking-widest">Terminés</div></div>
                 </div>
             </div>
 
@@ -132,10 +132,10 @@ export default function WorkOrdersPage() {
                         onChange={(e) => setStatusFilter(e.target.value)}
                     >
                         <option value="all">Tous les Statuts</option>
-                        <option value="OPEN">Ouvert</option>
-                        <option value="IN_PROGRESS">En Cours</option>
-                        <option value="DONE">Terminé</option>
-                        <option value="CLOSED">Clôturé</option>
+                        <option value="open">Ouvert</option>
+                        <option value="in_progress">En Cours</option>
+                        <option value="done">Terminé</option>
+                        <option value="closed">Clôturé</option>
                     </select>
                 </div>
             </div>

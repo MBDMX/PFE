@@ -12,9 +12,40 @@ api.interceptors.request.use(cfg => {
     return cfg;
 });
 
+// Global Error Interceptor
+api.interceptors.response.use(
+    (response) => response,
+    (error) => {
+        // Broadcast custom event so a global Toast listener can catch it
+        if (typeof window !== 'undefined' && error.response) {
+            const status = error.response.status;
+            let message = error.response.data?.detail || "Une erreur est survenue côté serveur.";
+            
+            // Format FastAPI validation errors
+            if (Array.isArray(message)) {
+                message = message.map(err => err.msg).join(', ');
+            }
+
+            if (status >= 400) {
+                const event = new CustomEvent('api:error', { detail: message });
+                window.dispatchEvent(event);
+            }
+        }
+        return Promise.reject(error);
+    }
+);
+
 export const gmaoApi = {
     getMachines: async () => {
         const res = await api.get('/machines');
+        return res.data;
+    },
+    createMachine: async (data: any) => {
+        const res = await api.post('/machines', data);
+        return res.data;
+    },
+    updateMachine: async (id: number | string, data: any) => {
+        const res = await api.put(`/machines/${id}`, data);
         return res.data;
     },
     getStock: async () => {
@@ -43,6 +74,14 @@ export const gmaoApi = {
     },
     updateWorkOrder: async (id: number | string, data: any) => {
         const res = await api.patch(`/work-orders/${id}`, data);
+        return res.data;
+    },
+    getMachineWorkOrders: async (machineId: number) => {
+        const res = await api.get(`/machines/${machineId}/work-orders`);
+        return res.data;
+    },
+    addWorkOrderPart: async (woId: number | string, data: { part_code: string, quantity: number }) => {
+        const res = await api.post(`/work-orders/${woId}/parts`, data);
         return res.data;
     }
 };

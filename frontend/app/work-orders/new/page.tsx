@@ -1,6 +1,6 @@
 'use client';
 import { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { 
   ArrowLeft, 
   Save, 
@@ -18,14 +18,15 @@ import { useToast } from '@/components/ui/toast';
 
 export default function NewWorkOrder() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [loading, setLoading] = useState(false);
   const [machines, setMachines] = useState<any[]>([]);
-  const { success, error: toastError } = useToast();
+  const { success } = useToast();
   
   const [formData, setFormData] = useState({
     title: '',
     description: '',
-    equipmentId: '',
+    equipmentId: searchParams.get('machine') || '',
     type: 'corrective',
     priority: 'medium',
     location: '',
@@ -39,12 +40,18 @@ export default function NewWorkOrder() {
       try {
         const data = await gmaoApi.getMachines();
         setMachines(data);
+        // If equipmentId was pre-filled from query, find its location
+        const prefillRef = searchParams.get('machine');
+        if (prefillRef) {
+          const machine = data.find((m: any) => m.reference === prefillRef);
+          if (machine) setFormData(prev => ({...prev, location: machine.location}));
+        }
       } catch (err) {
         console.error("Failed to load machines", err);
       }
     };
     loadMachines();
-  }, []);
+  }, [searchParams]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -53,10 +60,8 @@ export default function NewWorkOrder() {
       const res = await gmaoApi.createWorkOrder(formData);
       success('Ordre de Travail créé', `${res.sap_order_id || 'SAP Confirmation'} enregistré.`);
       router.push('/work-orders');
-      router.refresh(); 
     } catch (err) {
-      console.error("Failed to create work order", err);
-      toastError('Erreur de création', 'Impossible de joindre le serveur SAP');
+      // Handled by global interceptor
       setLoading(false);
     }
   };

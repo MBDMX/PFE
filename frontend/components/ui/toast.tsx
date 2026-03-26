@@ -178,6 +178,15 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
     info:    (title, message) => addToast({ type: 'info',    title, message }),
   };
 
+  useEffect(() => {
+    function handleApiError(e: Event) {
+      const customEvent = e as CustomEvent<string>;
+      api.error("Action Refusée", customEvent.detail);
+    }
+    window.addEventListener('api:error', handleApiError);
+    return () => window.removeEventListener('api:error', handleApiError);
+  }, [api]);
+
   return (
     <ToastContext.Provider value={api}>
       {children}

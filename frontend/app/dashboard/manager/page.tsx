@@ -1,72 +1,132 @@
 'use client';
-import { ClipboardList, Clock, Wrench, CheckCircle } from 'lucide-react';
-import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, Legend } from 'recharts';
+import { useState, useEffect } from 'react';
+import {
+    ClipboardList, Wrench, Flame, Package,
+    Bell, TrendingUp, User, CheckCircle, CalendarClock
+} from 'lucide-react';
+import api, { gmaoApi } from '../../../services/api';
+import KPICard from './_components/KPICard';
+import OTStatusChart from './_components/OTStatusChart';
+import RecentOTTable from './_components/RecentOTTable';
+import AlertsWidget from './_components/AlertsWidget';
+import { ManagerStats, WorkOrder } from './_components/types';
 
-const stats = [
-    { label: 'OT assignés', value: 4, icon: ClipboardList, color: '#3b82f6', bg: '#dbeafe' },
-    { label: 'En attente', value: 2, icon: Clock, color: '#f59e0b', bg: '#fef9c3' },
-    { label: 'En cours', value: 1, icon: Wrench, color: '#6366f1', bg: '#ede9fe' },
-    { label: 'Terminés ce mois', value: 8, icon: CheckCircle, color: '#10b981', bg: '#dcfce7' },
-];
-const pieData = [
-    { name: 'En attente', value: 2, color: '#f59e0b' },
-    { name: 'En cours', value: 1, color: '#3b82f6' },
-    { name: 'Terminé', value: 8, color: '#10b981' },
-    { name: 'Annulé', value: 1, color: '#ef4444' },
-];
-const ots = [
-    { id: 1, title: 'Vidange compresseur', machine: 'Compresseur A1', priority: 'medium', status: 'pending', due: '10/03/2026' },
-    { id: 2, title: 'Remplacement courroie', machine: 'Tour CN-200', priority: 'high', status: 'in_progress', due: '07/03/2026' },
-    { id: 3, title: 'Réparation presse', machine: 'Presse Hydraulique P5', priority: 'critical', status: 'pending', due: '06/03/2026' },
-];
-const statusBadge: Record<string, string> = { pending: 'badge badge-yellow', in_progress: 'badge badge-blue', done: 'badge badge-green' };
-const priorityBadge: Record<string, string> = { medium: 'badge badge-blue', high: 'badge badge-orange', critical: 'badge badge-red', low: 'badge badge-gray' };
-const statusLabel: Record<string, string> = { pending: 'En attente', in_progress: 'En cours', done: 'Terminé' };
-const priorityLabel: Record<string, string> = { medium: 'Moyen', high: 'Élevé', critical: 'Critique', low: 'Faible' };
+function getUser() {
+    if (typeof window === 'undefined') return { name: '', sub: '' };
+    try {
+        const t = localStorage.getItem('token');
+        if (!t) return { name: '', sub: '' };
+        return JSON.parse(window.atob(t.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
+    } catch { return { name: '', sub: '' }; }
+}
 
 export default function ManagerDashboard() {
+    const [stats, setStats] = useState<ManagerStats | null>(null);
+    const [wos, setWos] = useState<WorkOrder[]>([]);
+    const [loading, setLoading] = useState(true);
+    const user = typeof window !== 'undefined' ? getUser() : { name: '', sub: '' };
+
+    useEffect(() => {
+        Promise.all([
+            api.get('/manager-stats').then(r => setStats(r.data)),
+            gmaoApi.getWorkOrders().then(data => setWos(data)),
+        ]).finally(() => setLoading(false));
+    }, []);
+
+    const displayName = user.name || user.sub || 'Responsable';
+
     return (
-        <div>
-            <h1 className="page-header">Tableau de bord — Responsable</h1>
-            <div className="stat-grid">
-                {stats.map(s => (
-                    <div key={s.label} className="card stat-card">
-                        <div className="stat-icon" style={{ background: s.bg }}><s.icon size={22} color={s.color} /></div>
-                        <div><div className="stat-value">{s.value}</div><div className="stat-label">{s.label}</div></div>
+        <div className="animate-in fade-in slide-in-from-bottom-4 duration-700 space-y-8 pb-10">
+
+            {/* ── Header ── */}
+            <header className="page-header px-2">
+                <div>
+                    <h1 className="text-3xl font-black bg-gradient-to-r from-white to-slate-400 bg-clip-text text-transparent tracking-tight">
+                        Bonjour, {displayName}
+                    </h1>
+                    <p className="text-sm font-bold text-slate-500 uppercase tracking-widest mt-1">
+                        GMAO Responsable — Vue d&apos;ensemble
+                    </p>
+                    <div className="flex items-center gap-2 mt-3">
+                        <div className="flex items-center gap-2 bg-slate-900 border border-white/5 px-3 py-1.5 rounded-xl">
+                            <User size={12} className="text-violet-400" />
+                            <span className="text-[0.65rem] font-bold text-slate-300 uppercase tracking-widest">
+                                {displayName}
+                            </span>
+                        </div>
                     </div>
-                ))}
-            </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.5fr', gap: '1rem' }}>
-                <div className="card">
-                    <h2 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: '1rem' }}>Statut des OT</h2>
-                    <ResponsiveContainer width="100%" height={200}>
-                        <PieChart>
-                            <Pie data={pieData} dataKey="value" cx="50%" cy="50%" outerRadius={75}>
-                                {pieData.map((e, i) => <Cell key={i} fill={e.color} />)}
-                            </Pie>
-                            <Tooltip />
-                            <Legend iconType="circle" iconSize={10} />
-                        </PieChart>
-                    </ResponsiveContainer>
                 </div>
-                <div className="card">
-                    <h2 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: '1rem' }}>OT en attente</h2>
-                    <table>
-                        <thead><tr><th>Titre</th><th>Machine</th><th>Priorité</th><th>Statut</th><th>Échéance</th></tr></thead>
-                        <tbody>
-                            {ots.map(o => (
-                                <tr key={o.id}>
-                                    <td style={{ fontWeight: 600 }}>{o.title}</td>
-                                    <td style={{ color: 'var(--muted)', fontSize: '0.82rem' }}>{o.machine}</td>
-                                    <td><span className={priorityBadge[o.priority]}>{priorityLabel[o.priority]}</span></td>
-                                    <td><span className={statusBadge[o.status]}>{statusLabel[o.status]}</span></td>
-                                    <td style={{ fontSize: '0.82rem' }}>{o.due}</td>
-                                </tr>
-                            ))}
-                        </tbody>
-                    </table>
+                <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-2 bg-violet-600/10 border border-violet-500/20 px-4 py-2 rounded-2xl">
+                        <TrendingUp size={16} className="text-violet-400" />
+                        <span className="text-[0.65rem] font-bold text-violet-400 uppercase tracking-widest">Responsable</span>
+                    </div>
+                    <div className="size-11 rounded-2xl bg-slate-900 border border-white/5 flex items-center justify-center text-slate-400 hover:text-white transition-all cursor-pointer relative">
+                        <Bell size={20} />
+                        {stats && stats.criticalOT > 0 && (
+                            <span className="absolute top-2 right-2 size-2 bg-rose-500 rounded-full border-2 border-slate-950 animate-ping" />
+                        )}
+                    </div>
                 </div>
+            </header>
+
+            {/* ── KPIs ── */}
+            {loading ? (
+                <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
+                    {[1, 2, 3, 4, 5].map(i => <div key={i} className="azure-card h-28 animate-pulse" />)}
+                </div>
+            ) : stats ? (
+                <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
+                    <KPICard
+                        label="OT Terminés"
+                        value={stats.doneOT}
+                        sub={`${stats.totalOT} ordres au total`}
+                        icon={CheckCircle}
+                        color="emerald"
+                    />
+                    <KPICard
+                        label="En cours"
+                        value={stats.inProgressOT}
+                        sub={`${stats.openOT} en attente`}
+                        icon={Wrench}
+                        color="amber"
+                    />
+                    <KPICard
+                        label="OT Critiques"
+                        value={stats.criticalOT}
+                        sub="Priorité maximale"
+                        icon={Flame}
+                        color="rose"
+                        alert={stats.criticalOT > 0}
+                    />
+                    <KPICard
+                        label="Stock bas"
+                        value={stats.lowStock}
+                        sub="Pièces ≤ 5 unités"
+                        icon={Package}
+                        color="orange"
+                        alert={stats.lowStock > 0}
+                    />
+                    <KPICard
+                        label="Maint. Due"
+                        value={stats.dueMaintenance}
+                        sub="Machines à réviser"
+                        icon={CalendarClock}
+                        color="violet"
+                        alert={stats.dueMaintenance > 0}
+                    />
+                </div>
+            ) : null}
+
+            {/* ── Chart + Alertes ── */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                {stats && <OTStatusChart stats={stats} />}
+                <AlertsWidget workOrders={wos} lowStock={stats?.lowStock ?? 0} />
             </div>
+
+            {/* ── Table OT récents ── */}
+            <RecentOTTable workOrders={wos} />
+
         </div>
     );
 }

@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Float, Text, ForeignKey
+from sqlalchemy import Column, Integer, String, Float, Text, ForeignKey, Boolean
 from sqlalchemy.orm import relationship
 from app.db.session import Base
 
@@ -19,6 +19,8 @@ class Machine(Base):
     location = Column(String)
     status = Column(String)
     health_score = Column(Integer)
+    last_maintenance_date = Column(String)
+    next_maintenance_date = Column(String)
 
 class WorkOrder(Base):
     __tablename__ = "work_orders"
@@ -55,6 +57,7 @@ class WorkOrderPart(Base):
     part_code = Column(String)
     part_name = Column(String)
     quantity = Column(Integer)
+    deducted = Column(Boolean, default=False)
     
     work_order = relationship("WorkOrder", back_populates="parts")
 

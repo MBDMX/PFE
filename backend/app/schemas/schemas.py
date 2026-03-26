@@ -31,6 +31,8 @@ class TokenRefreshRequest(BaseModel):
 
 class MachineBase(BaseModel):
     name: str; reference: str; location: str; status: str; health_score: int
+    last_maintenance_date: Optional[str] = None
+    next_maintenance_date: Optional[str] = None
 
 class Machine(MachineBase):
     id: int
@@ -86,3 +88,15 @@ class Stats(BaseModel):
     openOrders: int
     lowStock: int
     totalTechnicians: int
+
+class ManagerStats(BaseModel):
+    totalOT: int
+    openOT: int
+    inProgressOT: int
+    doneOT: int
+    overdueOT: int
+    criticalOT: int
+    lowStock: int
+    avgMachineHealth: int
+    resolutionRate: int
+    dueMaintenance: int # Alerts for maintenance due soon
