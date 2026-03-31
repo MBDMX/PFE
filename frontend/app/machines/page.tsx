@@ -22,6 +22,8 @@ import {
     Clock,
     Calendar,
     ArrowUpRight,
+    CalendarClock,
+    Zap,
 } from 'lucide-react';
 import api, { gmaoApi } from '@/services/api';
 
@@ -35,6 +37,7 @@ type Machine = {
     health_score: number;
     last_maintenance_date?: string;
     next_maintenance_date?: string;
+    maintenance_frequency_days?: number;
 };
 
 export default function MachinesPage() {
@@ -44,21 +47,13 @@ export default function MachinesPage() {
     const [searchTerm, setSearchTerm] = useState('');
     const [statusFilter, setStatusFilter] = useState('all');
 
-    // Modal State
-    const [isModalOpen, setIsModalOpen] = useState(false);
-    const [editingMachine, setEditingMachine] = useState<Machine | null>(null);
-    const [formData, setFormData] = useState({
-        name: '',
-        reference: '',
-        location: '',
-        status: 'operational' as Status,
-        health_score: 100
-    });
+
 
     // Machine Detail Side Panel State
     const [selectedMachine, setSelectedMachine] = useState<Machine | null>(null);
     const [machineOrders, setMachineOrders] = useState<any[]>([]);
     const [loadingOrders, setLoadingOrders] = useState(false);
+    const [triggeringMaintenance, setTriggeringMaintenance] = useState(false);
 
     async function handleSelectMachine(m: Machine) {
         setSelectedMachine(m);
@@ -73,53 +68,29 @@ export default function MachinesPage() {
         }
     };
 
-    const handleEdit = (m: Machine, e: React.MouseEvent) => {
-        e.stopPropagation(); // Avoid opening side panel
-        setEditingMachine(m);
-        setFormData({
-            name: m.name,
-            reference: m.reference,
-            location: m.location,
-            status: m.status,
-            health_score: m.health_score
-        });
-        setIsModalOpen(true);
-    };
-
-    const handleDelete = async (id: number, e: React.MouseEvent) => {
-        e.stopPropagation();
-        if (confirm("Voulez-vous vraiment supprimer cette machine ?")) {
-            try {
-                await api.delete(`/machines/${id}`);
-                fetchMachines();
-                if (selectedMachine?.id === id) setSelectedMachine(null);
-            } catch (err) {
-                console.error("Delete failed");
-            }
-        }
-    };
-
-    const handleSubmit = async () => {
-        if (!formData.name || !formData.reference || !formData.location) {
-            const event = new CustomEvent('api:error', { detail: "Veuillez remplir tous les champs obligatoires." });
-            window.dispatchEvent(event);
-            return;
-        }
-
+    async function handleTriggerMaintenance(m: Machine) {
+        setTriggeringMaintenance(true);
         try {
-            if (editingMachine) {
-                await gmaoApi.updateMachine(editingMachine.id, formData);
-            } else {
-                await gmaoApi.createMachine(formData);
-            }
-            setIsModalOpen(false);
-            setEditingMachine(null);
-            setFormData({ name: '', reference: '', location: '', status: 'operational', health_score: 100 });
-            fetchMachines();
+            const res = await gmaoApi.triggerMaintenance(m.id);
+            // Refresh both machine list + OT list for this machine
+            await fetchMachines();
+            const updatedMachine = machines.find(mac => mac.id === m.id) || m;
+            const orders = await gmaoApi.getMachineWorkOrders(m.id);
+            setMachineOrders(orders);
+            // Update selection with new dates
+            const freshRes = await import('@/services/api').then(mod => mod.default.get('/machines'));
+            const freshMachine = freshRes.data.find((mac: Machine) => mac.id === m.id);
+            if (freshMachine) setSelectedMachine(freshMachine);
+            const event = new CustomEvent('api:success', { detail: `OT préventif créé (${res.sap_order_id})` });
+            window.dispatchEvent(event);
         } catch (err) {
-            console.error("Operation failed - handled globally");
+            console.error('Trigger maintenance failed', err);
+        } finally {
+            setTriggeringMaintenance(false);
         }
     };
+
+
 
     const fetchMachines = async () => {
         setLoading(true);
@@ -395,7 +366,37 @@ export default function MachinesPage() {
                         </div>
                     </div>
 
-                    <div className="p-6 bg-slate-900/60 border-t border-white/5">
+                    <div className="p-6 bg-slate-900/60 border-t border-white/5 space-y-3">
+                        {/* Maintenance Preventive Section */}
+                        <div className="azure-card p-4 bg-violet-500/5 border-violet-500/20">
+                            <div className="flex items-center gap-2 mb-3">
+                                <CalendarClock size={16} className="text-violet-400" />
+                                <span className="text-[0.65rem] font-black text-violet-400 uppercase tracking-widest">Plan Préventif</span>
+                            </div>
+                            <div className="flex justify-between items-center text-xs mb-3">
+                                <div>
+                                    <div className="text-[0.6rem] font-bold text-slate-500 uppercase mb-0.5">Fréquence</div>
+                                    <div className="font-black text-white">Tous les {selectedMachine.maintenance_frequency_days || 90}j</div>
+                                </div>
+                                <div className="text-right">
+                                    <div className="text-[0.6rem] font-bold text-slate-500 uppercase mb-0.5">Prochaine</div>
+                                    <div className={`font-black ${selectedMachine.next_maintenance_date && new Date(selectedMachine.next_maintenance_date) < new Date() ? 'text-rose-400' : 'text-white'}`}>
+                                        {selectedMachine.next_maintenance_date
+                                            ? new Date(selectedMachine.next_maintenance_date).toLocaleDateString('fr-FR')
+                                            : 'Non planifiée'
+                                        }
+                                    </div>
+                                </div>
+                            </div>
+                            <button
+                                onClick={() => handleTriggerMaintenance(selectedMachine)}
+                                disabled={triggeringMaintenance}
+                                className="w-full py-2.5 rounded-xl bg-violet-600 hover:bg-violet-500 disabled:opacity-50 text-white font-black uppercase text-xs tracking-[0.15em] transition-all flex items-center justify-center gap-2"
+                            >
+                                <Zap size={14} />
+                                {triggeringMaintenance ? 'Création...' : 'Déclencher OT Préventif'}
+                            </button>
+                        </div>
                         <button
                             onClick={() => router.push(`/work-orders/new?machine=${selectedMachine.reference}`)}
                             className="w-full py-4 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-black uppercase text-xs tracking-[0.2em] shadow-lg shadow-blue-600/20 transition-all flex items-center justify-center gap-2 group"

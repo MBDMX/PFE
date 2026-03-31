@@ -1,4 +1,4 @@
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, computed_field
 from typing import List, Optional
 
 class UserLogin(BaseModel):
@@ -33,6 +33,7 @@ class MachineBase(BaseModel):
     name: str; reference: str; location: str; status: str; health_score: int
     last_maintenance_date: Optional[str] = None
     next_maintenance_date: Optional[str] = None
+    maintenance_frequency_days: Optional[int] = 90
 
 class Machine(MachineBase):
     id: int
@@ -40,6 +41,7 @@ class Machine(MachineBase):
 
 class StockBase(BaseModel):
     name: str; reference: str; quantity: int; unit: str; location: str; image: Optional[str] = None; synonyms: Optional[str] = None
+    unit_price: Optional[float] = 0.0
 
 class Stock(StockBase):
     id: int
@@ -51,6 +53,7 @@ class WorkOrderPart(BaseModel):
     part_code: str
     part_name: str
     quantity: int
+    unit_price_at_consumption: Optional[float] = 0.0
     model_config = ConfigDict(from_attributes=True)
 
 class WorkOrder(BaseModel):
@@ -79,6 +82,10 @@ class WorkOrder(BaseModel):
     created_by: Optional[int] = None
     
     parts: Optional[List[WorkOrderPart]] = []
+    
+    @computed_field
+    def total_parts_cost(self) -> float:
+        return round(sum(p.quantity * (getattr(p, 'unit_price_at_consumption', 0.0) or 0.0) for p in self.parts), 2) if self.parts else 0.0
     
     model_config = ConfigDict(from_attributes=True)
 

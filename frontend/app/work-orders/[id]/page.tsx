@@ -77,9 +77,9 @@ export default function WorkOrderDetailPage({ params }: { params: Promise<{ id: 
   async function handleAddPart() {
     if (!newPart.code || newPart.qty < 1) return;
     try {
-      await gmaoApi.addWorkOrderPart(order.id, { 
-        part_code: newPart.code, 
-        quantity: newPart.qty 
+      await gmaoApi.addWorkOrderPart(order.id, {
+        part_code: newPart.code,
+        quantity: newPart.qty
       });
       // Refresh order to show new parts
       const updated = await gmaoApi.getWorkOrder(id);
@@ -95,11 +95,11 @@ export default function WorkOrderDetailPage({ params }: { params: Promise<{ id: 
   const getStatusStyle = (status: string) => {
     const s = status?.toLowerCase();
     switch (s) {
-      case 'open':        return { label: 'Ouvert',    color: 'text-amber-400',   bg: 'bg-amber-400/10',   icon: Clock };
-      case 'in_progress': return { label: 'En cours',  color: 'text-blue-400',    bg: 'bg-blue-400/10',    icon: Activity };
-      case 'done':        return { label: 'Terminé',   color: 'text-emerald-400', bg: 'bg-emerald-400/10', icon: CheckCircle };
-      case 'closed':      return { label: 'Clôturé',   color: 'text-slate-500',   bg: 'bg-slate-500/10',   icon: X };
-      default:            return { label: 'Inconnu',   color: 'text-slate-400',   bg: 'bg-slate-400/10',   icon: Clock };
+      case 'open': return { label: 'Ouvert', color: 'text-amber-400', bg: 'bg-amber-400/10', icon: Clock };
+      case 'in_progress': return { label: 'En cours', color: 'text-blue-400', bg: 'bg-blue-400/10', icon: Activity };
+      case 'done': return { label: 'Terminé', color: 'text-emerald-400', bg: 'bg-emerald-400/10', icon: CheckCircle };
+      case 'closed': return { label: 'Clôturé', color: 'text-slate-500', bg: 'bg-slate-500/10', icon: X };
+      default: return { label: 'Inconnu', color: 'text-slate-400', bg: 'bg-slate-400/10', icon: Clock };
     }
   };
 
@@ -211,20 +211,20 @@ export default function WorkOrderDetailPage({ params }: { params: Promise<{ id: 
 
           {/* New Line: Location & Planned starts */}
           <div className="grid grid-cols-2 gap-4 mt-4">
-             <div className="azure-card p-4 flex items-center gap-4 bg-slate-900/40">
-                <div className="size-9 rounded-lg bg-rose-500/10 flex items-center justify-center text-rose-500 border border-rose-500/20"><MapPin size={18}/></div>
-                <div>
-                   <div className="text-[0.6rem] font-bold text-slate-500 uppercase tracking-widest">Localisation Technique</div>
-                   <div className="text-sm font-bold text-white">{order.technical_location}</div>
-                </div>
-             </div>
-             <div className="azure-card p-4 flex items-center gap-4 bg-slate-900/40">
-                <div className="size-9 rounded-lg bg-emerald-500/10 flex items-center justify-center text-emerald-500 border border-emerald-500/20"><Calendar size={18}/></div>
-                <div>
-                   <div className="text-[0.6rem] font-bold text-slate-500 uppercase tracking-widest">Planification Initiale</div>
-                   <div className="text-sm font-bold text-white">{order.planned_start_date}</div>
-                </div>
-             </div>
+            <div className="azure-card p-4 flex items-center gap-4 bg-slate-900/40">
+              <div className="size-9 rounded-lg bg-rose-500/10 flex items-center justify-center text-rose-500 border border-rose-500/20"><MapPin size={18} /></div>
+              <div>
+                <div className="text-[0.6rem] font-bold text-slate-500 uppercase tracking-widest">Localisation Technique</div>
+                <div className="text-sm font-bold text-white">{order.technical_location}</div>
+              </div>
+            </div>
+            <div className="azure-card p-4 flex items-center gap-4 bg-slate-900/40">
+              <div className="size-9 rounded-lg bg-emerald-500/10 flex items-center justify-center text-emerald-500 border border-emerald-500/20"><Calendar size={18} /></div>
+              <div>
+                <div className="text-[0.6rem] font-bold text-slate-500 uppercase tracking-widest">Planification Initiale</div>
+                <div className="text-sm font-bold text-white">{order.planned_start_date}</div>
+              </div>
+            </div>
           </div>
 
           {/* Description Block */}
@@ -242,18 +242,35 @@ export default function WorkOrderDetailPage({ params }: { params: Promise<{ id: 
                 <h3 className="text-[0.7rem] font-black text-slate-400 uppercase tracking-[0.2em] mb-4">Pièces de rechange consommées</h3>
                 <div className="space-y-2">
                   {order.parts.map((p: any) => (
-                    <div key={p.id} className="flex items-center justify-between p-3 rounded-xl bg-white/5 border border-white/5 hover:bg-white/10 transition-colors">
+                    <div key={p.id} className="flex flex-col sm:flex-row sm:items-center justify-between p-3 rounded-xl bg-white/5 border border-white/5 hover:bg-white/10 transition-colors gap-3">
                       <div className="flex items-center gap-3">
-                        <div className="size-8 rounded-lg bg-blue-600/10 flex items-center justify-center text-blue-400 border border-blue-500/20 font-black text-[0.6rem]">
+                        <div className="size-8 rounded-lg bg-blue-600/10 flex items-center justify-center text-blue-400 border border-blue-500/20 font-black text-[0.6rem] shrink-0">
                           {p.part_code}
                         </div>
-                        <span className="text-sm font-bold text-white">{p.part_name}</span>
+                        <div>
+                          <div className="text-sm font-bold text-white">{p.part_name}</div>
+                          <div className="text-[0.6rem] font-bold text-slate-500 uppercase tracking-widest mt-0.5">
+                            {p.unit_price_at_consumption ? `${p.unit_price_at_consumption.toFixed(3)} TND / Unité` : '0.000 TND / Unité'}
+                          </div>
+                        </div>
                       </div>
-                      <div className="bg-blue-600 text-white px-3 py-1 rounded-lg text-xs font-black">
-                        x{p.quantity}
+                      <div className="flex items-center self-end sm:self-auto gap-4">
+                        <div className="text-right">
+                          <div className="text-sm font-black text-emerald-400">{((p.unit_price_at_consumption || 0) * p.quantity).toFixed(3)} TND</div>
+                          <div className="text-[0.6rem] font-bold text-slate-500 uppercase tracking-widest mt-0.5">Qté : {p.quantity}</div>
+                        </div>
                       </div>
                     </div>
                   ))}
+                </div>
+
+                <div className="mt-4 p-4 rounded-xl bg-slate-900/60 border border-white/5 flex justify-between items-center shadow-inner">
+                  <span className="text-xs font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                    Coût Matériel Total
+                  </span>
+                  <span className="text-xl font-black text-emerald-400">
+                    {order.parts.reduce((sum: number, p: any) => sum + (p.quantity * (p.unit_price_at_consumption || 0)), 0).toFixed(3)} TND
+                  </span>
                 </div>
               </div>
             )}
@@ -261,7 +278,7 @@ export default function WorkOrderDetailPage({ params }: { params: Promise<{ id: 
             {/* Add Part Form */}
             <div className="mt-6 pt-6 border-t border-white/5">
               {!showAddPart ? (
-                <button 
+                <button
                   onClick={() => setShowAddPart(true)}
                   className="w-full py-3 rounded-xl border border-dashed border-white/10 text-slate-500 hover:text-blue-400 hover:border-blue-500/30 hover:bg-blue-500/5 transition-all font-bold text-xs uppercase tracking-widest flex items-center justify-center gap-2"
                 >
@@ -271,13 +288,13 @@ export default function WorkOrderDetailPage({ params }: { params: Promise<{ id: 
                 <div className="azure-card p-4 bg-slate-950/30 space-y-4">
                   <div className="flex items-center justify-between mb-2">
                     <span className="text-[0.6rem] font-black text-blue-400 uppercase tracking-widest">Nouvelle Consommation</span>
-                    <button onClick={() => setShowAddPart(false)}><X size={14} className="text-slate-500"/></button>
+                    <button onClick={() => setShowAddPart(false)}><X size={14} className="text-slate-500" /></button>
                   </div>
                   <div className="grid grid-cols-3 gap-3">
                     <div className="col-span-2">
-                      <select 
+                      <select
                         value={newPart.code}
-                        onChange={e => setNewPart({...newPart, code: e.target.value})}
+                        onChange={e => setNewPart({ ...newPart, code: e.target.value })}
                         className="w-full bg-slate-900 border border-white/10 rounded-lg p-2 text-xs font-bold text-white focus:outline-none focus:border-blue-500"
                       >
                         <option value="">Sélectionner une pièce...</option>
@@ -286,16 +303,16 @@ export default function WorkOrderDetailPage({ params }: { params: Promise<{ id: 
                         ))}
                       </select>
                     </div>
-                    <input 
+                    <input
                       type="number"
                       min="1"
                       value={newPart.qty}
-                      onChange={e => setNewPart({...newPart, qty: Number(e.target.value)})}
+                      onChange={e => setNewPart({ ...newPart, qty: Number(e.target.value) })}
                       className="bg-slate-900 border border-white/10 rounded-lg p-2 text-xs font-bold text-white focus:outline-none focus:border-blue-500"
                       placeholder="Qté"
                     />
                   </div>
-                  <button 
+                  <button
                     onClick={handleAddPart}
                     className="w-full py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg font-black text-[0.65rem] uppercase tracking-widest transition-all"
                   >

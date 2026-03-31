@@ -10,6 +10,7 @@ export interface StockItem {
   location: string;
   image?: string;
   synonyms?: string;
+  unit_price?: number;
 }
 
 // ────────────────────────────────────────────

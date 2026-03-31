@@ -9,6 +9,7 @@ import KPICard from './_components/KPICard';
 import OTStatusChart from './_components/OTStatusChart';
 import RecentOTTable from './_components/RecentOTTable';
 import AlertsWidget from './_components/AlertsWidget';
+import ReliabilityWidget from './_components/ReliabilityWidget';
 import { ManagerStats, WorkOrder } from './_components/types';
 
 function getUser() {
@@ -124,8 +125,15 @@ export default function ManagerDashboard() {
                 <AlertsWidget workOrders={wos} lowStock={stats?.lowStock ?? 0} />
             </div>
 
-            {/* ── Table OT récents ── */}
-            <RecentOTTable workOrders={wos} />
+            {/* ── Reliability KPIs (MTBF / MTTR) + Table OT récents ── */}
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                <div className="lg:col-span-1">
+                    <ReliabilityWidget />
+                </div>
+                <div className="lg:col-span-2">
+                    <RecentOTTable workOrders={wos} />
+                </div>
+            </div>
 
         </div>
     );

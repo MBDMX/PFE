@@ -10,6 +10,10 @@ from app.schemas.schemas import Machine as MachineSchema, Stock as StockSchema, 
 
 router = APIRouter()
 
+@router.get("/ping")
+def ping():
+    return {"ping": "pong"}
+
 @router.get("/machines", response_model=List[MachineSchema])
 def get_machines(db: Session = Depends(get_db)):
     return db.query(Machine).all()
@@ -109,6 +113,105 @@ def get_manager_stats(db: Session = Depends(get_db)):
         "resolutionRate": resolution_rate,
         "dueMaintenance": due_maintenance,
     }
+
+@router.get("/kpi-reliability")
+def get_reliability_kpis(db: Session = Depends(get_db)):
+    """
+    Compute MTBF and MTTR from work order history.
+    
+    MTTR = Mean Time To Repair
+         = Average time_spent (hours) across closed corrective work orders
+    
+    MTBF = Mean Time Between Failures (per machine, averaged across fleet)
+         = Average gap (days) between consecutive corrective OTs on the same equipment
+    """
+    from datetime import datetime
+
+    corrective_types = {"corrective", "breakdown"}
+    done_statuses = {"done", "closed"}
+    
+    all_wos = db.query(WorkOrder).all()
+    corrective_wos = [w for w in all_wos if (w.type or "").lower() in corrective_types]
+    closed_corrective = [w for w in corrective_wos if (w.status or "").lower() in done_statuses]
+    
+    # ── MTTR ─────────────────────────────────────────────────────────────────
+    # Use time_spent if available, otherwise estimate from dates
+    repair_times = []
+    for wo in closed_corrective:
+        if wo.time_spent and wo.time_spent > 0:
+            repair_times.append(wo.time_spent)
+        elif wo.planned_start_date and wo.planned_end_date:
+            try:
+                start = datetime.fromisoformat(wo.planned_start_date)
+                end   = datetime.fromisoformat(wo.planned_end_date)
+                hours = (end - start).total_seconds() / 3600
+                if 0 < hours < 720:  # sanity cap at 30 days
+                    repair_times.append(hours)
+            except (ValueError, TypeError):
+                pass
+
+    mttr_hours = round(sum(repair_times) / len(repair_times), 2) if repair_times else 0
+    
+    # ── MTBF ─────────────────────────────────────────────────────────────────
+    # Group corrective OTs by equipment_id, sort by start date, compute inter-failure gaps
+    from collections import defaultdict
+    equipment_ots = defaultdict(list)
+    for wo in corrective_wos:
+        eq = wo.equipment_id
+        date_str = wo.planned_start_date or wo.actual_start_date
+        if eq and date_str:
+            try:
+                dt = datetime.fromisoformat(date_str)
+                equipment_ots[eq].append(dt)
+            except (ValueError, TypeError):
+                pass
+    
+    all_gaps_days = []
+    machine_breakdown = []
+    
+    for eq, dates in equipment_ots.items():
+        if len(dates) < 2:
+            machine_breakdown.append({
+                "equipment_id": eq,
+                "failure_count": len(dates),
+                "mtbf_days": None,
+            })
+            continue
+        
+        sorted_dates = sorted(dates)
+        gaps = [(sorted_dates[i+1] - sorted_dates[i]).days for i in range(len(sorted_dates)-1)]
+        valid_gaps = [g for g in gaps if g >= 0]
+        avg_gap = round(sum(valid_gaps) / len(valid_gaps), 1) if valid_gaps else None
+        all_gaps_days.extend(valid_gaps)
+        
+        machine_breakdown.append({
+            "equipment_id": eq,
+            "failure_count": len(dates),
+            "mtbf_days": avg_gap,
+        })
+    
+    # Sort by failure count desc for display
+    machine_breakdown.sort(key=lambda x: x["failure_count"], reverse=True)
+    
+    global_mtbf = round(sum(all_gaps_days) / len(all_gaps_days), 1) if all_gaps_days else None
+    
+    # ── Reliability % ─────────────────────────────────────────────────────────
+    # Simple approximation: if MTBF and MTTR are known, reliability = MTBF / (MTBF + MTTR)
+    reliability_pct = None
+    if global_mtbf and mttr_hours:
+        mttr_days = mttr_hours / 24
+        reliability_pct = round((global_mtbf / (global_mtbf + mttr_days)) * 100, 1)
+    
+    return {
+        "mttr_hours": mttr_hours,
+        "mtbf_days": global_mtbf,
+        "reliability_pct": reliability_pct,
+        "total_corrective_ots": len(corrective_wos),
+        "closed_corrective_ots": len(closed_corrective),
+        "machine_breakdown": machine_breakdown[:10],  # top 10 by failure count
+    }
+
+
 
 @router.post("/stock/order")
 def order_stock(
@@ -229,8 +332,123 @@ def add_work_order_part(wo_id: int, part_data: dict, db: Session = Depends(get_d
         part_code=item.reference,
         part_name=item.name,
         quantity=qty,
+        unit_price_at_consumption=item.unit_price,
         deducted=True # Mark as already deducted
     )
     db.add(new_part)
     db.commit()
     return {"status": "success", "part": item.name, "remaining": item.quantity}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PREVENTIVE MAINTENANCE AUTO-TRIGGER
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.get("/machines/{machine_id}/maintenance-status")
+def get_machine_maintenance_status(machine_id: int, db: Session = Depends(get_db)):
+    """Returns the detailed maintenance status of a machine including overdue/due-soon flags."""
+    from datetime import timedelta
+    machine = db.query(Machine).filter(Machine.id == machine_id).first()
+    if not machine:
+        raise HTTPException(status_code=404, detail="Machine introuvable")
+    
+    today = date.today()
+    next_date = machine.next_maintenance_date
+    
+    if not next_date:
+        return {
+            "machine_id": machine_id,
+            "machine_name": machine.name,
+            "status": "not_planned",
+            "next_maintenance_date": None,
+            "last_maintenance_date": machine.last_maintenance_date,
+            "frequency_days": machine.maintenance_frequency_days,
+            "days_remaining": None,
+        }
+    
+    try:
+        next_dt = date.fromisoformat(next_date)
+        days_remaining = (next_dt - today).days
+        
+        if days_remaining < 0:
+            status = "overdue"
+        elif days_remaining <= 7:
+            status = "due_soon"
+        else:
+            status = "ok"
+    except ValueError:
+        status = "unknown"
+        days_remaining = None
+
+    return {
+        "machine_id": machine_id,
+        "machine_name": machine.name,
+        "status": status,
+        "next_maintenance_date": next_date,
+        "last_maintenance_date": machine.last_maintenance_date,
+        "frequency_days": machine.maintenance_frequency_days,
+        "days_remaining": days_remaining,
+    }
+
+
+@router.post("/machines/{machine_id}/trigger-maintenance")
+def trigger_preventive_maintenance(
+    machine_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(role_required(["admin", "manager"]))
+):
+    """Auto-generate a preventive maintenance Work Order for a machine.
+    Also updates last_maintenance_date and computes next_maintenance_date
+    based on the configured frequency."""
+    from datetime import timedelta
+    
+    machine = db.query(Machine).filter(Machine.id == machine_id).first()
+    if not machine:
+        raise HTTPException(status_code=404, detail="Machine introuvable")
+    
+    today = date.today()
+    freq = machine.maintenance_frequency_days or 90
+    
+    # Compute next maintenance date using today as the new baseline
+    next_maintenance = today + timedelta(days=freq)
+    
+    # Update machine maintenance dates
+    machine.last_maintenance_date = today.isoformat()
+    machine.next_maintenance_date = next_maintenance.isoformat()
+    
+    # Auto-generate a preventive Work Order
+    last_id = db.query(WorkOrder).count() + 1056
+    sap_id = f"SAP-WO-{last_id}-PM"
+    
+    new_wo = WorkOrder(
+        sap_order_id=sap_id,
+        title=f"Maintenance Préventive — {machine.name}",
+        description=(
+            f"Plan de maintenance préventive automatique (fréquence : tous les {freq} jours).\n"
+            f"Équipement : {machine.name} [{machine.reference}]\n"
+            f"Localisation : {machine.location}\n"
+            f"Prochaine révision prévue : {next_maintenance.isoformat()}"
+        ),
+        type="preventive",
+        priority="medium",
+        status="open",
+        technical_location=machine.location,
+        equipment_id=machine.reference,
+        team="Maint-Préventif",
+        planned_start_date=today.isoformat(),
+        planned_end_date=today.isoformat(),
+    )
+    
+    db.add(new_wo)
+    db.commit()
+    db.refresh(new_wo)
+    
+    logging.info(f"Preventive OT #{sap_id} auto-generated for machine {machine.name}")
+    
+    return {
+        "status": "success",
+        "message": f"OT préventif créé pour {machine.name}",
+        "work_order_id": new_wo.id,
+        "sap_order_id": sap_id,
+        "next_maintenance_date": next_maintenance.isoformat(),
+    }
+

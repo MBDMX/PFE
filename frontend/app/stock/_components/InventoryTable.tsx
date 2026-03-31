@@ -27,6 +27,7 @@ export default function InventoryTable({ items, isLoading, canOrder, onOrder }: 
                 <th>Article</th>
                 <th>Quantité</th>
                 <th>Emplacement</th>
+                <th>Prix Unité</th>
                 {canOrder && <th className="text-right">Actions</th>}
               </tr>
             </thead>
@@ -63,8 +64,8 @@ export default function InventoryTable({ items, isLoading, canOrder, onOrder }: 
                     <td>
                       <div className="flex items-center gap-3">
                         <div className={`size-2.5 rounded-full shadow-[0_0_8px] ${item.quantity <= 5 ? 'bg-rose-500 shadow-rose-500/40' :
-                            item.quantity <= 15 ? 'bg-amber-400 shadow-amber-400/40' :
-                              'bg-emerald-500 shadow-emerald-500/40'
+                          item.quantity <= 15 ? 'bg-amber-400 shadow-amber-400/40' :
+                            'bg-emerald-500 shadow-emerald-500/40'
                           }`}
                           title={
                             item.quantity <= 5 ? 'Stock Critique' :
@@ -79,6 +80,11 @@ export default function InventoryTable({ items, isLoading, canOrder, onOrder }: 
                       <div className="flex items-center gap-2 text-slate-400">
                         <MapPin size={14} className="text-slate-600" />
                         <span className="font-bold text-xs uppercase tracking-tight">{item.location}</span>
+                      </div>
+                    </td>
+                    <td>
+                      <div className="font-black text-slate-300 tracking-widest text-sm">
+                        {item.unit_price ? `${item.unit_price.toFixed(3)} TND` : '-'}
                       </div>
                     </td>
                     {canOrder && (

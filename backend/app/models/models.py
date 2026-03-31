@@ -21,6 +21,7 @@ class Machine(Base):
     health_score = Column(Integer)
     last_maintenance_date = Column(String)
     next_maintenance_date = Column(String)
+    maintenance_frequency_days = Column(Integer, default=90)
 
 class WorkOrder(Base):
     __tablename__ = "work_orders"
@@ -58,6 +59,7 @@ class WorkOrderPart(Base):
     part_name = Column(String)
     quantity = Column(Integer)
     deducted = Column(Boolean, default=False)
+    unit_price_at_consumption = Column(Float, default=0.0)
     
     work_order = relationship("WorkOrder", back_populates="parts")
 
@@ -71,3 +73,4 @@ class Stock(Base):
     location = Column(String)
     image = Column(String)
     synonyms = Column(String)
+    unit_price = Column(Float, default=0.0)

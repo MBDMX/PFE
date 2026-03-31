@@ -65,7 +65,6 @@ export default function StockPage() {
   const canOrder = userRole === 'admin' || userRole === 'manager';
 
   const handleOrder = async (item: StockItem) => {
-    if (!window.confirm(`Commander une unité de ${item.name} ?`)) return;
     try {
       await gmaoApi.orderStock(item.id, 1);
       success('Commande transmise', `${item.name} — SAP confirmé`);

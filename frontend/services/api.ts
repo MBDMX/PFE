@@ -1,7 +1,7 @@
 import axios from 'axios';
 
-const apiBaseUrl = typeof window !== 'undefined' 
-    ? `http://${window.location.hostname}:4000/api` 
+const apiBaseUrl = typeof window !== 'undefined'
+    ? `http://${window.location.hostname}:4000/api`
     : 'http://localhost:4000/api';
 
 const api = axios.create({ baseURL: process.env.NEXT_PUBLIC_API_URL || apiBaseUrl });
@@ -20,7 +20,7 @@ api.interceptors.response.use(
         if (typeof window !== 'undefined' && error.response) {
             const status = error.response.status;
             let message = error.response.data?.detail || "Une erreur est survenue côté serveur.";
-            
+
             // Format FastAPI validation errors
             if (Array.isArray(message)) {
                 message = message.map(err => err.msg).join(', ');
@@ -38,14 +38,6 @@ api.interceptors.response.use(
 export const gmaoApi = {
     getMachines: async () => {
         const res = await api.get('/machines');
-        return res.data;
-    },
-    createMachine: async (data: any) => {
-        const res = await api.post('/machines', data);
-        return res.data;
-    },
-    updateMachine: async (id: number | string, data: any) => {
-        const res = await api.put(`/machines/${id}`, data);
         return res.data;
     },
     getStock: async () => {
@@ -83,7 +75,19 @@ export const gmaoApi = {
     addWorkOrderPart: async (woId: number | string, data: { part_code: string, quantity: number }) => {
         const res = await api.post(`/work-orders/${woId}/parts`, data);
         return res.data;
-    }
+    },
+    getMachineMaintenanceStatus: async (machineId: number) => {
+        const res = await api.get(`/machines/${machineId}/maintenance-status`);
+        return res.data;
+    },
+    triggerMaintenance: async (machineId: number) => {
+        const res = await api.post(`/machines/${machineId}/trigger-maintenance`);
+        return res.data;
+    },
+    getReliabilityKpis: async () => {
+        const res = await api.get('/kpi-reliability');
+        return res.data;
+    },
 };
 
 export default api;

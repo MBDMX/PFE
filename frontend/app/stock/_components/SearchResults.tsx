@@ -70,6 +70,9 @@ export default function SearchResults({ results, searchTerm, canOrder, onOrder }
                       <span className="text-[0.65rem] font-bold text-slate-500 uppercase tracking-widest">
                         <Box size={10} className="inline mr-1" />{item.quantity} {item.unit}
                       </span>
+                      <span className="text-[0.65rem] font-bold text-blue-400 uppercase tracking-widest">
+                        {item.unit_price ? `${item.unit_price.toFixed(3)} TND` : '-'}
+                      </span>
                     </div>
                     {item.synonyms && item.synonyms.length > 0 && (
                       <div className="flex flex-wrap gap-1 mt-3">
