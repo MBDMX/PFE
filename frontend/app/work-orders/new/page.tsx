@@ -15,10 +15,36 @@ import {
   Package,
   Plus,
   Trash2,
-  Clock
+  Clock,
+  ListChecks,
+  Download
 } from 'lucide-react';
 import { gmaoApi } from '@/services/api';
 import { useToast } from '@/components/ui/toast';
+
+const SAP_TEMPLATES = {
+  'preventive': [
+    "Inspection visuelle et sonore",
+    "Nettoyage des composants critiques",
+    "Lubrification / Graissage",
+    "Contrôle des serrages et fixations",
+    "Test fonctionnel et validation"
+  ],
+  'moteur': [
+    "Démontage du carter de protection",
+    "Inspection de l'usure des charbons/balais",
+    "Contrôle de l'isolement bobinage",
+    "Nettoyage du collecteur",
+    "Remontage et test de montée en température"
+  ],
+  'hydraulique': [
+    "Vérification du niveau et état de l'huile",
+    "Purge du circuit d'air",
+    "Remplacement des crépines/filtres",
+    "Contrôle d'étanchéité des raccords",
+    "Test de pression nominale"
+  ]
+};
 
 export default function NewWorkOrder() {
   const router = useRouter();
@@ -44,6 +70,10 @@ export default function NewWorkOrder() {
     endDate: new Date().toISOString().split('T')[0],
     createdAt: new Date().toISOString().slice(0, 16) // "YYYY-MM-DDTHH:mm"
   });
+
+  // Steps / Tasks Logic
+  const [steps, setSteps] = useState<string[]>([]);
+  const [currentStep, setCurrentStep] = useState('');
 
   // Spare Parts Logic
   const [selectedParts, setSelectedParts] = useState<any[]>([]);
@@ -103,13 +133,25 @@ export default function NewWorkOrder() {
     setSelectedParts(selectedParts.filter(p => p.part_code !== code));
   };
 
+  const handleAddStep = () => {
+    if (currentStep.trim()) {
+      setSteps([...steps, currentStep.trim()]);
+      setCurrentStep('');
+    }
+  };
+
+  const handleImportTemplate = (type: keyof typeof SAP_TEMPLATES) => {
+    setSteps([...steps, ...SAP_TEMPLATES[type]]);
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     try {
       const payload = {
         ...formData,
-        parts: selectedParts
+        parts: selectedParts,
+        steps: steps
       };
       const res = await gmaoApi.createWorkOrder(payload);
       if (res.offline) {
@@ -335,12 +377,89 @@ export default function NewWorkOrder() {
                 )}
               </div>
             </div>
+          </div>
+        </div>
+
+        {/* ── Section 3: Étapes / Checklist d'intervention ── */}
+        <div className="azure-card p-10 space-y-8">
+          <div className="flex items-center justify-between mb-2 border-b border-white/5 pb-5">
+            <div className="flex items-center gap-3">
+              <ListChecks size={24} className="text-sky-400" />
+              <h2 className="text-sm font-black text-white uppercase tracking-widest">Étapes / Checklist d'Intervention</h2>
+            </div>
             
-            {selectedParts.length > 0 && (
-              <div className="mt-6 p-4 rounded-2xl bg-emerald-500/5 border border-emerald-500/10 text-emerald-500 text-[0.65rem] font-black uppercase tracking-widest text-center">
-                {selectedParts.length} article(s) à déduire du stock
+            {/* SAP Import Buttons */}
+            <div className="flex items-center gap-3">
+              <p className="text-[0.6rem] font-black text-slate-500 uppercase tracking-widest mr-2">Importer gamme SAP :</p>
+              <button 
+                type="button"
+                onClick={() => handleImportTemplate('preventive')}
+                className="px-3 py-2 bg-sky-500/10 border border-sky-500/20 rounded-lg text-[0.6rem] font-black text-sky-400 uppercase tracking-widest hover:bg-sky-500/20 transition-all"
+              >
+                Gamme-PV
+              </button>
+              <button 
+                type="button"
+                onClick={() => handleImportTemplate('moteur')}
+                className="px-3 py-2 bg-sky-500/10 border border-sky-500/20 rounded-lg text-[0.6rem] font-black text-sky-400 uppercase tracking-widest hover:bg-sky-500/20 transition-all"
+              >
+                Révision-M
+              </button>
+              <button 
+                type="button"
+                onClick={() => handleImportTemplate('hydraulique')}
+                className="px-3 py-2 bg-sky-500/10 border border-sky-500/20 rounded-lg text-[0.6rem] font-black text-sky-400 uppercase tracking-widest hover:bg-sky-500/20 transition-all"
+              >
+                Gamme-HYD
+              </button>
+            </div>
+          </div>
+
+          <div className="space-y-6">
+            <div className="flex gap-4">
+              <div className="relative flex-1 group">
+                <input 
+                  className="w-full bg-slate-950/50 border border-white/10 rounded-2xl py-4 px-6 text-white text-base font-bold placeholder:text-slate-600 focus:outline-none focus:border-sky-500/50 transition-all"
+                  placeholder="Ajouter une étape manuelle (ex: Vérifier le serrage moteur)"
+                  value={currentStep}
+                  onChange={(e) => setCurrentStep(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), handleAddStep())}
+                />
               </div>
-            )}
+              <button 
+                type="button"
+                onClick={handleAddStep}
+                className="size-14 bg-sky-600 hover:bg-sky-500 text-white rounded-2xl flex items-center justify-center shrink-0 transition-colors shadow-lg shadow-sky-500/20"
+              >
+                <Plus size={26} />
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {steps.map((s, i) => (
+                <div key={i} className="flex items-center justify-between p-4 bg-white/5 border border-white/5 rounded-2xl group hover:border-sky-500/20 transition-all">
+                  <div className="flex items-center gap-4">
+                    <div className="size-8 rounded-lg bg-sky-600/20 text-sky-400 flex items-center justify-center text-xs font-black">
+                      {i + 1}
+                    </div>
+                    <span className="text-sm font-bold text-slate-200">{s}</span>
+                  </div>
+                  <button 
+                    type="button"
+                    onClick={() => setSteps(steps.filter((_, idx) => idx !== i))}
+                    className="size-8 rounded-lg hover:bg-rose-500/10 text-slate-700 hover:text-rose-500 flex items-center justify-center transition-all"
+                  >
+                    <Trash2 size={16} />
+                  </button>
+                </div>
+              ))}
+              {steps.length === 0 && (
+                <div className="md:col-span-2 py-10 flex flex-col items-center justify-center text-slate-700 border-2 border-dashed border-white/5 rounded-2xl">
+                  <Download size={32} className="mb-2 opacity-20" />
+                  <p className="text-xs font-black uppercase tracking-widest opacity-30">Aucune étape définie pour cet OT</p>
+                </div>
+              )}
+            </div>
           </div>
         </div>
 

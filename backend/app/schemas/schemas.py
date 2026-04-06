@@ -59,6 +59,17 @@ class WorkOrderPart(BaseModel):
     unit_price_at_consumption: Optional[float] = 0.0
     model_config = ConfigDict(from_attributes=True)
 
+class WorkOrderStep(BaseModel):
+    id: int
+    work_order_id: int
+    description: str
+    is_done: bool
+    order_index: int
+    model_config = ConfigDict(from_attributes=True)
+
+class WorkOrderStepUpdate(BaseModel):
+    is_done: bool
+
 class WorkOrder(BaseModel):
     id: int
     sap_order_id: Optional[str] = None
@@ -86,6 +97,7 @@ class WorkOrder(BaseModel):
     created_at: Optional[str] = None
     
     parts: Optional[List[WorkOrderPart]] = []
+    steps: Optional[List[WorkOrderStep]] = []
     
     @computed_field
     def total_parts_cost(self) -> float:

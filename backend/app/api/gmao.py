@@ -4,9 +4,9 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from app.db.session import get_db
-from app.models.models import Machine, Stock, WorkOrder, User, WorkOrderPart, PartsRequest, PartsRequestItem
+from app.models.models import Machine, Stock, WorkOrder, User, WorkOrderPart, WorkOrderStep, PartsRequest, PartsRequestItem
 from app.api.deps import get_current_user, role_required
-from app.schemas.schemas import UserOut, Machine as MachineSchema, Stock as StockSchema, Stats, WorkOrder as WorkOrderSchema, ManagerStats, PartsRequestOut
+from app.schemas.schemas import UserOut, Machine as MachineSchema, Stock as StockSchema, Stats, WorkOrder as WorkOrderSchema, ManagerStats, PartsRequestOut, WorkOrderStep as WorkOrderStepSchema, WorkOrderStepUpdate
 
 router = APIRouter()
 
@@ -81,9 +81,36 @@ def create_work_order(order_data: dict, db: Session = Depends(get_db)):
                 )
                 db.add(new_part)
     
+    # Handle initial steps if provided
+    steps_list = order_data.get("steps", [])
+    for idx, s_desc in enumerate(steps_list):
+        if s_desc:
+            new_step = WorkOrderStep(
+                work_order_id=new_wo.id,
+                description=s_desc,
+                is_done=False,
+                order_index=idx
+            )
+            db.add(new_step)
+
     db.commit()
     db.refresh(new_wo)
     return new_wo
+
+@router.patch("/work-orders/steps/{step_id}/toggle", response_model=WorkOrderStepSchema)
+def toggle_work_order_step(
+    step_id: int, 
+    update: WorkOrderStepUpdate,
+    db: Session = Depends(get_db)
+):
+    step = db.query(WorkOrderStep).filter(WorkOrderStep.id == step_id).first()
+    if not step:
+        raise HTTPException(status_code=404, detail="Étape introuvable")
+    
+    step.is_done = update.is_done
+    db.commit()
+    db.refresh(step)
+    return step
 
 @router.get("/stats", response_model=Stats)
 def get_stats(db: Session = Depends(get_db)):

@@ -161,6 +161,22 @@ export const gmaoApi = {
     getReliabilityKpis: () => handleGet('/kpi-reliability'),
     getTechnicians: () => handleGet('/technicians', db.technicians),
 
+    toggleStep: async (stepId: number, isDone: boolean) => {
+        if (typeof window !== 'undefined' && !navigator.onLine) {
+            await db.syncQueue.add({
+                type: 'UPDATE_WORK_ORDER',
+                endpoint: `/work-orders/steps/${stepId}/toggle`,
+                method: 'PATCH',
+                payload: { is_done: isDone },
+                timestamp: Date.now(),
+                status: 'pending'
+            });
+            return { offline: true };
+        }
+        const res = await api.patch(`/work-orders/steps/${stepId}/toggle`, { is_done: isDone });
+        return res.data;
+    },
+
     // MANAGER
     getManagerStats: async () => {
         if (typeof window !== 'undefined' && !navigator.onLine) {

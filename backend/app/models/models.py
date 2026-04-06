@@ -53,6 +53,17 @@ class WorkOrder(Base):
     created_at = Column(String)
     
     parts = relationship("WorkOrderPart", back_populates="work_order")
+    steps = relationship("WorkOrderStep", back_populates="work_order")
+
+class WorkOrderStep(Base):
+    __tablename__ = "work_order_steps"
+    id = Column(Integer, primary_key=True, index=True)
+    work_order_id = Column(Integer, ForeignKey("work_orders.id"))
+    description = Column(String)
+    is_done = Column(Boolean, default=False)
+    order_index = Column(Integer, default=0)
+    
+    work_order = relationship("WorkOrder", back_populates="steps")
 
 class WorkOrderPart(Base):
     __tablename__ = "work_order_parts"

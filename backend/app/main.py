@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.api import auth, gmao
 from app.db.session import engine, Base, SessionLocal
-from app.models.models import User, Machine, Stock, WorkOrder, WorkOrderPart, PartsRequest, PartsRequestItem
+from app.models.models import User, Machine, Stock, WorkOrder, WorkOrderStep, WorkOrderPart, PartsRequest, PartsRequestItem
 from app.core.security import get_password_hash
 
 # Initialize Database
@@ -56,6 +56,13 @@ def seed_data():
             WorkOrderPart(work_order_id=2, part_code="CT-B47", part_name="Courroie trapézoïdale B47", quantity=1),
             WorkOrderPart(work_order_id=1, part_code="FH-HYD-100", part_name="Filtre à huile hydraulique", quantity=2),
             WorkOrderPart(work_order_id=4, part_code="JT-NBR-50", part_name="Joint torique NBR 50x3mm", quantity=4)
+        ])
+        db.add_all([
+            WorkOrderStep(work_order_id=1, description="Vérifier niveau d'huile", is_done=True, order_index=0),
+            WorkOrderStep(work_order_id=1, description="Remplacer le filtre", is_done=False, order_index=1),
+            WorkOrderStep(work_order_id=2, description="Démonter l'ancienne courroie", is_done=True, order_index=0),
+            WorkOrderStep(work_order_id=2, description="Nettoyer les poulies", is_done=False, order_index=1),
+            WorkOrderStep(work_order_id=2, description="Installer nouvelle courroie", is_done=False, order_index=2),
         ])
         db.commit()
     db.close()
