@@ -199,6 +199,23 @@ export const gmaoApi = {
     getTechnicianWorkOrders: (techId: number) => handleGet(`/manager/technicians/${techId}/work-orders`),
     
     // MAGASINIER
+    getMagasinierStats: async () => {
+        if (typeof window !== 'undefined' && !navigator.onLine) {
+            const cached = await db.stats.get({ key: 'magasinier_stats' });
+            return cached ? cached.data : null;
+        }
+        try {
+            const res = await api.get('/magasinier/stats');
+            if (typeof window !== 'undefined') {
+                await db.stats.put({ key: 'magasinier_stats', data: res.data });
+            }
+            return res.data;
+        } catch (err) {
+            const cached = await db.stats.get({ key: 'magasinier_stats' });
+            return cached ? cached.data : null;
+        }
+    },
+    getStockMovements: () => handleGet('/stock/movements', db.stockMovements),
     createPartsRequest: (data: any) => handlePost('/parts-requests', data, 'CREATE_PARTS_REQUEST'),
     getPartsRequests: (statusFilter?: string) => {
         const endpoint = statusFilter ? `/parts-requests?status_filter=${statusFilter}` : '/parts-requests';
@@ -207,7 +224,7 @@ export const gmaoApi = {
     approvePartsRequest: async (reqId: number) => {
         if (typeof window !== 'undefined' && !navigator.onLine) {
             await db.syncQueue.add({
-                type: 'UPDATE_WORK_ORDER', 
+                type: 'APPROVE_PARTS_REQUEST', 
                 endpoint: `/parts-requests/${reqId}/approve`,
                 method: 'PATCH',
                 payload: {},
@@ -222,7 +239,7 @@ export const gmaoApi = {
     rejectPartsRequest: async (reqId: number, reason: string) => {
         if (typeof window !== 'undefined' && !navigator.onLine) {
             await db.syncQueue.add({
-                type: 'UPDATE_WORK_ORDER', 
+                type: 'REJECT_PARTS_REQUEST', 
                 endpoint: `/parts-requests/${reqId}/reject`,
                 method: 'PATCH',
                 payload: { reason },

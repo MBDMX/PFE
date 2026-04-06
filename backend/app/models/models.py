@@ -114,3 +114,17 @@ class PartsRequestItem(Base):
 
     request = relationship("PartsRequest", back_populates="items")
 
+class StockMovement(Base):
+    __tablename__ = "stock_movements"
+    id = Column(Integer, primary_key=True, index=True)
+    part_code = Column(String)
+    part_name = Column(String)
+    quantity = Column(Integer)
+    type = Column(String) # IN / OUT
+    date = Column(String)
+    user_id = Column(Integer, ForeignKey("users.id"))
+    work_order_id = Column(Integer, ForeignKey("work_orders.id"), nullable=True)
+    request_id = Column(Integer, ForeignKey("parts_requests.id"), nullable=True)
+    
+    user = relationship("User")
+

@@ -1,12 +1,12 @@
 from typing import List
-from datetime import date
+from datetime import date, datetime
 import logging
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from app.db.session import get_db
-from app.models.models import Machine, Stock, WorkOrder, User, WorkOrderPart, WorkOrderStep, PartsRequest, PartsRequestItem
+from app.models.models import Machine, Stock, WorkOrder, User, WorkOrderPart, WorkOrderStep, PartsRequest, PartsRequestItem, StockMovement
 from app.api.deps import get_current_user, role_required
-from app.schemas.schemas import UserOut, Machine as MachineSchema, Stock as StockSchema, Stats, WorkOrder as WorkOrderSchema, ManagerStats, PartsRequestOut, WorkOrderStep as WorkOrderStepSchema, WorkOrderStepUpdate
+from app.schemas.schemas import UserOut, Machine as MachineSchema, Stock as StockSchema, Stats, WorkOrder as WorkOrderSchema, ManagerStats, PartsRequestOut, WorkOrderStep as WorkOrderStepSchema, WorkOrderStepUpdate, MagasinierStats, StockMovement as StockMovementSchema
 
 router = APIRouter()
 
@@ -80,6 +80,26 @@ def create_work_order(order_data: dict, db: Session = Depends(get_db)):
                     deducted=False # Will be deducted on closure or manual trigger
                 )
                 db.add(new_part)
+                
+    # Automatically create a PartsRequest for these initial parts
+    if parts_list:
+        pr = PartsRequest(
+            work_order_id=new_wo.id,
+            requested_by=order_data.get("requested_by", 1), # Default or current user if possible
+            status="pending",
+            created_at=datetime.utcnow().strftime("%Y-%m-%d %H:%M")
+        )
+        db.add(pr)
+        db.flush() # Get PR ID
+        for p in parts_list:
+            if p.get("part_code"):
+                pr_item = PartsRequestItem(
+                    request_id=pr.id,
+                    part_code=p["part_code"],
+                    part_name=p.get("part_name", ""),
+                    quantity_requested=p.get("quantity", 1)
+                )
+                db.add(pr_item)
     
     # Handle initial steps if provided
     steps_list = order_data.get("steps", [])
@@ -362,6 +382,18 @@ def order_stock(
     # Simulating order logic: in a real app, this would create a Purchase Order in SAP
     # Here we just log it and maybe increment the quantity for demo
     item.quantity += qty
+    
+    # Log movement (IN)
+    movement = StockMovement(
+        part_code=item.reference,
+        part_name=item.name,
+        quantity=qty,
+        type="IN",
+        date=datetime.utcnow().strftime("%Y-%m-%d %H:%M"),
+        user_id=current_user.id
+    )
+    db.add(movement)
+    
     db.commit()
     
     return {
@@ -379,8 +411,12 @@ def get_machine_work_orders(machine_id: int, db: Session = Depends(get_db)):
     return orders
 
 @router.patch("/work-orders/{wo_id}", response_model=WorkOrderSchema)
-def update_work_order(wo_id: int, update_data: dict, db: Session = Depends(get_db)):
-    from datetime import datetime
+def update_work_order(
+    wo_id: int, 
+    update_data: dict, 
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
     order = db.query(WorkOrder).filter(WorkOrder.id == wo_id).first()
     if not order:
         raise HTTPException(status_code=404, detail="Ordre de travail introuvable")
@@ -402,9 +438,7 @@ def update_work_order(wo_id: int, update_data: dict, db: Session = Depends(get_d
 
     if is_completed and not was_completed:
         order.actual_end_date = datetime.utcnow().strftime("%Y-%m-%d")
-        
-        # Ensure we have the latest parts list from DB before deduction
-        db.refresh(order)
+        # parts relation will be lazy-loaded with current data
         logging.info(f"Deducting remaining stock for OT #{wo_id} ({len(order.parts)} parts)")
 
         for part in order.parts:
@@ -424,6 +458,19 @@ def update_work_order(wo_id: int, update_data: dict, db: Session = Depends(get_d
                 if item.quantity >= part.quantity:
                     item.quantity -= part.quantity
                     part.deducted = True # Mark as deducted
+                    
+                    # Log Stock Movement
+                    movement = StockMovement(
+                        part_code=item.reference,
+                        part_name=item.name,
+                        quantity=part.quantity,
+                        type="OUT",
+                        date=datetime.utcnow().strftime("%Y-%m-%d %H:%M"),
+                        user_id=current_user.id,
+                        work_order_id=order.id
+                    )
+                    db.add(movement)
+                    
                     logging.info(f"Auto-deducted {part.quantity} of {item.name} on closure. New qty: {item.quantity}")
                     stock_updates.append({
                         "part": item.name,
@@ -440,7 +487,12 @@ def update_work_order(wo_id: int, update_data: dict, db: Session = Depends(get_d
     return order
 
 @router.post("/work-orders/{wo_id}/parts")
-def add_work_order_part(wo_id: int, part_data: dict, db: Session = Depends(get_db)):
+def add_work_order_part(
+    wo_id: int, 
+    part_data: dict, 
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
     order = db.query(WorkOrder).filter(WorkOrder.id == wo_id).first()
     if not order:
         raise HTTPException(status_code=404, detail="Ordre de travail introuvable")
@@ -453,24 +505,38 @@ def add_work_order_part(wo_id: int, part_data: dict, db: Session = Depends(get_d
     if not item:
         raise HTTPException(status_code=404, detail="Cette pièce n'existe pas dans le stock SAP.")
 
-    # Deduct stock immediately
-    if item.quantity < qty:
-        raise HTTPException(status_code=400, detail=f"Stock insuffisant : demandé {qty}, disponible {item.quantity}")
+    # INSTEAD OF IMMEDIATE DEDUCTION: Create a PartsRequest for the Magasinier
+    pr = PartsRequest(
+        work_order_id=wo_id,
+        requested_by=current_user.id,
+        status="pending",
+        created_at=datetime.utcnow().strftime("%Y-%m-%d %H:%M")
+    )
+    db.add(pr)
+    db.flush() # Get PR ID
     
-    item.quantity -= qty
-    logging.info(f"Immediate deduction: {qty} of {item.name} for OT #{wo_id}. New stock: {item.quantity}")
+    pr_item = PartsRequestItem(
+        request_id=pr.id,
+        part_code=item.reference,
+        part_name=item.name,
+        quantity_requested=qty
+    )
+    db.add(pr_item)
 
+    # Add to WO parts but mark as NOT deducted yet
     new_part = WorkOrderPart(
         work_order_id=wo_id,
         part_code=item.reference,
         part_name=item.name,
         quantity=qty,
         unit_price_at_consumption=item.unit_price,
-        deducted=True # Mark as already deducted
+        deducted=False, # MARK AS FALSE: Magasinier will deduct
     )
     db.add(new_part)
     db.commit()
-    return {"status": "success", "part": item.name, "remaining": item.quantity}
+    
+    logging.info(f"Parts request created for {qty} of {item.name} for OT #{wo_id}.")
+    return {"status": "request_created", "message": "Demande envoyée au magasinier"}
 
 # ─────────────────────────────────────────────────────────────────────────────
 # PREVENTIVE MAINTENANCE AUTO-TRIGGER
@@ -638,6 +704,52 @@ def create_parts_request(
         "message": f"Demande de {len(items)} pièce(s) envoyée au Magasinier",
     }
 
+@router.get("/magasinier/stats", response_model=MagasinierStats)
+def get_magasinier_stats(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(role_required(["magasinier", "admin"]))
+):
+    pending = db.query(PartsRequest).filter(PartsRequest.status == "pending").count()
+    approved = db.query(PartsRequest).filter(PartsRequest.status == "approved").count()
+    rejected = db.query(PartsRequest).filter(PartsRequest.status == "rejected").count()
+    
+    # Total items out
+    total_out = db.query(StockMovement).filter(StockMovement.type == "OUT").count()
+    critical = db.query(Stock).filter(Stock.quantity <= 5).count()
+    
+    return {
+        "pending_requests": pending,
+        "approved_requests": approved,
+        "rejected_requests": rejected,
+        "total_items_out": total_out,
+        "critical_stock_alerts": critical
+    }
+
+@router.get("/stock/movements", response_model=List[StockMovementSchema])
+def get_stock_movements(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(role_required(["magasinier", "admin"]))
+):
+    movements = db.query(StockMovement).order_by(StockMovement.id.desc()).all()
+    # Enrich with user names
+    results = []
+    for m in movements:
+        user = db.query(User).filter(User.id == m.user_id).first()
+        m_dict = {
+            "id": m.id,
+            "part_code": m.part_code,
+            "part_name": m.part_name,
+            "quantity": m.quantity,
+            "type": m.type,
+            "date": m.date,
+            "user_id": m.user_id,
+            "work_order_id": m.work_order_id,
+            "request_id": m.request_id,
+            "user_name": user.name if user else "Inconnu"
+        }
+        results.append(m_dict)
+    return results
+
 
 @router.get("/parts-requests")
 def get_parts_requests(
@@ -743,6 +855,21 @@ def approve_parts_request(
     pr.status = "approved"
     pr.approved_by = current_user.id
     pr.approved_at = datetime.utcnow().strftime("%Y-%m-%d %H:%M")
+
+    # Log Stock Movement for each approved item
+    for item in pr.items:
+        if item.quantity_approved and item.quantity_approved > 0:
+            movement = StockMovement(
+                part_code=item.part_code,
+                part_name=item.part_name,
+                quantity=item.quantity_approved,
+                type="OUT",
+                date=pr.approved_at,
+                user_id=current_user.id,
+                work_order_id=pr.work_order_id,
+                request_id=pr.id
+            )
+            db.add(movement)
 
     db.commit()
 

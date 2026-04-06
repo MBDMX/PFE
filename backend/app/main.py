@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.api import auth, gmao
 from app.db.session import engine, Base, SessionLocal
-from app.models.models import User, Machine, Stock, WorkOrder, WorkOrderStep, WorkOrderPart, PartsRequest, PartsRequestItem
+from app.models.models import User, Machine, Stock, WorkOrder, WorkOrderStep, WorkOrderPart, PartsRequest, PartsRequestItem, StockMovement
 from app.core.security import get_password_hash
 
 # Initialize Database
@@ -64,6 +64,22 @@ def seed_data():
             WorkOrderStep(work_order_id=2, description="Nettoyer les poulies", is_done=False, order_index=1),
             WorkOrderStep(work_order_id=2, description="Installer nouvelle courroie", is_done=False, order_index=2),
         ])
+        
+        # Seed Parts Requests for Magasinier
+        pr1 = PartsRequest(work_order_id=1, requested_by=3, status="pending", created_at="2026-04-06 09:00")
+        db.add(pr1)
+        db.flush()
+        db.add_all([
+            PartsRequestItem(request_id=pr1.id, part_code="CT-B47", part_name="Courroie trapézoïdale B47", quantity_requested=2),
+            PartsRequestItem(request_id=pr1.id, part_code="JT-NBR-50", part_name="Joint torique NBR 50x3mm", quantity_requested=5)
+        ])
+        
+        # Seed a completed movement for Traceability
+        db.add(StockMovement(
+            part_code="FH-HYD-100", part_name="Filtre à huile hydraulique", quantity=1, 
+            type="OUT", date="2026-04-05 14:30", user_id=4, work_order_id=1
+        ))
+        
         db.commit()
     db.close()
 

@@ -148,3 +148,24 @@ class PartsRequestOut(BaseModel):
     work_order_sap_id: Optional[str] = None
     model_config = ConfigDict(from_attributes=True)
 
+class StockMovement(BaseModel):
+    id: int
+    part_code: str
+    part_name: str
+    quantity: int
+    type: str
+    date: str
+    user_id: int
+    work_order_id: Optional[int] = None
+    request_id: Optional[int] = None
+    user_name: Optional[str] = None
+    model_config = ConfigDict(from_attributes=True)
+
+class MagasinierStats(BaseModel):
+    pending_requests: int
+    approved_requests: int
+    rejected_requests: int
+    total_items_out: int
+    critical_stock_alerts: int
+
+

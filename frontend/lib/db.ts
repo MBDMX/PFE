@@ -6,7 +6,7 @@ import Dexie, { type EntityTable } from 'dexie';
 
 export interface OfflineAction {
   id?: number;
-  type: 'CREATE_WORK_ORDER' | 'UPDATE_WORK_ORDER' | 'ADD_PART' | 'CREATE_PARTS_REQUEST';
+  type: 'CREATE_WORK_ORDER' | 'UPDATE_WORK_ORDER' | 'ADD_PART' | 'CREATE_PARTS_REQUEST' | 'APPROVE_PARTS_REQUEST' | 'REJECT_PARTS_REQUEST';
   endpoint: string;
   method: 'POST' | 'PATCH' | 'PUT' | 'DELETE';
   payload: any;
@@ -34,6 +34,7 @@ class GMAODatabase extends Dexie {
   workOrders!: EntityTable<any, 'id'>;
   partsRequests!: EntityTable<any, 'id'>;
   technicians!: EntityTable<any, 'id'>;
+  stockMovements!: EntityTable<any, 'id'>;
   stats!: EntityTable<any, 'key'>; // We'll store stats as a single row with key='manager' or similar
   
   // Metadata (Last Sync times)
@@ -48,6 +49,7 @@ class GMAODatabase extends Dexie {
       workOrders: 'id, sap_order_id, title, status',
       partsRequests: 'id, work_order_id, status',
       technicians: 'id, username, role, team',
+      stockMovements: 'id, part_code, type, date',
       stats: 'key',
       metadata: 'key'
     });
