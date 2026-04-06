@@ -29,7 +29,7 @@ export default function ManagerDashboard() {
 
     useEffect(() => {
         Promise.all([
-            api.get('/manager-stats').then(r => setStats(r.data)),
+            gmaoApi.getManagerStats().then(data => setStats(data)),
             gmaoApi.getWorkOrders().then(data => setWos(data)),
         ]).finally(() => setLoading(false));
     }, []);

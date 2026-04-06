@@ -4,9 +4,9 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from app.db.session import get_db
-from app.models.models import Machine, Stock, WorkOrder, User, WorkOrderPart
+from app.models.models import Machine, Stock, WorkOrder, User, WorkOrderPart, PartsRequest, PartsRequestItem
 from app.api.deps import get_current_user, role_required
-from app.schemas.schemas import Machine as MachineSchema, Stock as StockSchema, Stats, WorkOrder as WorkOrderSchema, ManagerStats
+from app.schemas.schemas import UserOut, Machine as MachineSchema, Stock as StockSchema, Stats, WorkOrder as WorkOrderSchema, ManagerStats, PartsRequestOut
 
 router = APIRouter()
 
@@ -22,6 +22,10 @@ def get_machines(db: Session = Depends(get_db)):
 @router.get("/stock", response_model=List[StockSchema])
 def get_stock(db: Session = Depends(get_db)):
     return db.query(Stock).all()
+
+@router.get("/technicians", response_model=List[UserOut])
+def get_technicians(db: Session = Depends(get_db)):
+    return db.query(User).filter(User.role == "technician").all()
 
 @router.get("/work-orders", response_model=List[WorkOrderSchema])
 def get_work_orders(db: Session = Depends(get_db)):
@@ -49,10 +53,34 @@ def create_work_order(order_data: dict, db: Session = Depends(get_db)):
         technical_location=order_data.get("location"),
         equipment_id=order_data.get("equipmentId"),
         team=order_data.get("team"),
+        technician_id=order_data.get("technicianId"),
+        responsible_person=order_data.get("responsiblePerson"),
         planned_start_date=order_data.get("startDate"),
         planned_end_date=order_data.get("endDate"),
+        created_at=order_data.get("createdAt")
     )
     db.add(new_wo)
+    db.commit()
+    db.refresh(new_wo)
+    
+    # Handle initial spare parts if provided
+    parts_list = order_data.get("parts", [])
+    for p in parts_list:
+        p_code = p.get("part_code")
+        qty = p.get("quantity", 1)
+        if p_code:
+            item = db.query(Stock).filter(Stock.reference == p_code).first()
+            if item:
+                new_part = WorkOrderPart(
+                    work_order_id=new_wo.id,
+                    part_code=item.reference,
+                    part_name=item.name,
+                    quantity=qty,
+                    unit_price_at_consumption=item.unit_price,
+                    deducted=False # Will be deducted on closure or manual trigger
+                )
+                db.add(new_part)
+    
     db.commit()
     db.refresh(new_wo)
     return new_wo
@@ -211,6 +239,84 @@ def get_reliability_kpis(db: Session = Depends(get_db)):
         "machine_breakdown": machine_breakdown[:10],  # top 10 by failure count
     }
 
+# ─────────────────────────────────────────────────────────────────────────────
+# MANAGER SUPERVISION ÉQUIPE ENDPOINTS
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.get("/manager/technicians", response_model=List[UserOut])
+def get_manager_technicians(
+    db: Session = Depends(get_db), 
+    current_user: User = Depends(role_required(["manager", "admin"]))
+):
+    """Returns technicians strictly assigned to the current manager/admin."""
+    # Admins see all technicians, Managers see only their technicians
+    if current_user.role == "admin":
+        return db.query(User).filter(User.role == "technician").all()
+    else:
+        return db.query(User).filter(User.role == "technician", User.manager_id == current_user.id).all()
+
+@router.get("/manager/technicians/{tech_id}/stats")
+def get_technician_supervised_stats(
+    tech_id: int, 
+    db: Session = Depends(get_db), 
+    current_user: User = Depends(role_required(["manager", "admin"]))
+):
+    """Computes stats localized to a specific technician supervised by this manager."""
+    tech = db.query(User).filter(User.id == tech_id, User.role == "technician").first()
+    if not tech:
+        raise HTTPException(status_code=404, detail="Technician not found")
+        
+    # Enforce supervisor check
+    if current_user.role != "admin" and tech.manager_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not authorized to supervise this technician")
+
+    wos = db.query(WorkOrder).filter(WorkOrder.technician_id == tech_id).all()
+    
+    total = len(wos)
+    done_wos = [w for w in wos if w.status in ["done", "closed"]]
+    done_count = len(done_wos)
+    open_count = sum(1 for w in wos if w.status == "open")
+    in_progress = sum(1 for w in wos if w.status == "in_progress")
+    
+    # Calculate Completion Rate
+    completion_rate = round((done_count / total * 100)) if total > 0 else 0
+    
+    # Calculate Overdue
+    today = date.today().isoformat()
+    overdue_count = sum(
+        1 for w in wos 
+        if w.status not in ["done", "closed"] and w.planned_end_date and w.planned_end_date < today
+    )
+
+    # Average repair time for this tech
+    repair_times = [w.time_spent for w in done_wos if w.time_spent and w.time_spent > 0]
+    avg_repair_time = round(sum(repair_times) / len(repair_times), 1) if repair_times else 0
+
+    return {
+        "totalAssigned": total,
+        "doneOT": done_count,
+        "openOT": open_count,
+        "inProgressOT": in_progress,
+        "overdueOT": overdue_count,
+        "completionRate": completion_rate,
+        "avgRepairTime": avg_repair_time
+    }
+
+@router.get("/manager/technicians/{tech_id}/work-orders", response_model=List[WorkOrderSchema])
+def get_technician_supervised_wos(
+    tech_id: int, 
+    db: Session = Depends(get_db), 
+    current_user: User = Depends(role_required(["manager", "admin"]))
+):
+    """Returns specific work orders assigned to a technician."""
+    tech = db.query(User).filter(User.id == tech_id, User.role == "technician").first()
+    if not tech:
+        raise HTTPException(status_code=404, detail="Technician not found")
+        
+    if current_user.role != "admin" and tech.manager_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not authorized to view this technician's orders")
+
+    return db.query(WorkOrder).filter(WorkOrder.technician_id == tech_id).order_by(WorkOrder.id.desc()).all()
 
 
 @router.post("/stock/order")
@@ -452,3 +558,206 @@ def trigger_preventive_maintenance(
         "next_maintenance_date": next_maintenance.isoformat(),
     }
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# MAGASINIER — PARTS REQUEST WORKFLOW
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.post("/parts-requests")
+def create_parts_request(
+    req_data: dict,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Technicien submits a parts request for a specific work order."""
+    from datetime import datetime
+
+    wo_id = req_data.get("work_order_id")
+    items = req_data.get("items", [])
+
+    if not wo_id or not items:
+        raise HTTPException(status_code=400, detail="work_order_id et items sont requis")
+
+    wo = db.query(WorkOrder).filter(WorkOrder.id == wo_id).first()
+    if not wo:
+        raise HTTPException(status_code=404, detail="Ordre de travail introuvable")
+
+    pr = PartsRequest(
+        work_order_id=wo_id,
+        requested_by=current_user.id,
+        status="pending",
+        created_at=datetime.utcnow().strftime("%Y-%m-%d %H:%M"),
+    )
+    db.add(pr)
+    db.flush()  # get pr.id
+
+    for it in items:
+        part_code = (it.get("part_code") or "").strip()
+        stock_item = db.query(Stock).filter(Stock.reference.ilike(part_code)).first()
+        pri = PartsRequestItem(
+            request_id=pr.id,
+            part_code=part_code,
+            part_name=stock_item.name if stock_item else it.get("part_name", part_code),
+            quantity_requested=it.get("quantity", 1),
+        )
+        db.add(pri)
+
+    db.commit()
+    db.refresh(pr)
+
+    return {
+        "status": "success",
+        "request_id": pr.id,
+        "message": f"Demande de {len(items)} pièce(s) envoyée au Magasinier",
+    }
+
+
+@router.get("/parts-requests")
+def get_parts_requests(
+    status_filter: str = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Returns parts requests. Magasinier/Admin see all, Technicians see only their own."""
+    query = db.query(PartsRequest)
+
+    if current_user.role in ["magasinier", "admin", "manager"]:
+        pass  # see all
+    else:
+        query = query.filter(PartsRequest.requested_by == current_user.id)
+
+    if status_filter:
+        query = query.filter(PartsRequest.status == status_filter)
+
+    requests = query.order_by(PartsRequest.id.desc()).all()
+
+    # Enrich with names
+    results = []
+    for r in requests:
+        requester = db.query(User).filter(User.id == r.requested_by).first()
+        wo = db.query(WorkOrder).filter(WorkOrder.id == r.work_order_id).first()
+        data = {
+            "id": r.id,
+            "work_order_id": r.work_order_id,
+            "requested_by": r.requested_by,
+            "status": r.status,
+            "rejection_reason": r.rejection_reason,
+            "approved_by": r.approved_by,
+            "created_at": r.created_at,
+            "approved_at": r.approved_at,
+            "items": [{
+                "id": i.id,
+                "part_code": i.part_code,
+                "part_name": i.part_name,
+                "quantity_requested": i.quantity_requested,
+                "quantity_approved": i.quantity_approved,
+            } for i in r.items],
+            "requester_name": requester.name if requester else "Inconnu",
+            "work_order_title": wo.title if wo else "—",
+            "work_order_sap_id": wo.sap_order_id if wo else "—",
+        }
+        results.append(data)
+
+    return results
+
+
+@router.patch("/parts-requests/{req_id}/approve")
+def approve_parts_request(
+    req_id: int,
+    approve_data: dict = {},
+    db: Session = Depends(get_db),
+    current_user: User = Depends(role_required(["magasinier", "admin"]))
+):
+    """Magasinier approves a parts request. Deducts stock and adds parts to the OT."""
+    from datetime import datetime
+
+    pr = db.query(PartsRequest).filter(PartsRequest.id == req_id).first()
+    if not pr:
+        raise HTTPException(status_code=404, detail="Demande introuvable")
+    if pr.status != "pending":
+        raise HTTPException(status_code=400, detail=f"Demande déjà {pr.status}")
+
+    wo = db.query(WorkOrder).filter(WorkOrder.id == pr.work_order_id).first()
+    if not wo:
+        raise HTTPException(status_code=404, detail="OT introuvable")
+
+    errors = []
+    deducted_parts = []
+
+    for item in pr.items:
+        qty = item.quantity_requested
+        stock = db.query(Stock).filter(Stock.reference.ilike(item.part_code)).first()
+
+        if not stock:
+            errors.append(f"Pièce {item.part_code} introuvable en stock")
+            continue
+
+        if stock.quantity < qty:
+            errors.append(f"Stock insuffisant pour {stock.name}: demandé {qty}, disponible {stock.quantity}")
+            continue
+
+        # Deduct stock
+        stock.quantity -= qty
+        item.quantity_approved = qty
+
+        # Add part to the work order
+        wo_part = WorkOrderPart(
+            work_order_id=pr.work_order_id,
+            part_code=stock.reference,
+            part_name=stock.name,
+            quantity=qty,
+            unit_price_at_consumption=stock.unit_price,
+            deducted=True,
+        )
+        db.add(wo_part)
+        deducted_parts.append({"part": stock.name, "qty": qty, "remaining": stock.quantity})
+        logging.info(f"Magasinier approved: {qty}x {stock.name} for OT #{pr.work_order_id}")
+
+    pr.status = "approved"
+    pr.approved_by = current_user.id
+    pr.approved_at = datetime.utcnow().strftime("%Y-%m-%d %H:%M")
+
+    db.commit()
+
+    return {
+        "status": "approved",
+        "request_id": pr.id,
+        "deducted": deducted_parts,
+        "errors": errors,
+        "message": f"{len(deducted_parts)} pièce(s) validée(s) et sortie(s) du stock",
+    }
+
+
+@router.patch("/parts-requests/{req_id}/reject")
+def reject_parts_request(
+    req_id: int,
+    reject_data: dict,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(role_required(["magasinier", "admin"]))
+):
+    """Magasinier rejects a parts request with a mandatory reason."""
+    from datetime import datetime
+
+    pr = db.query(PartsRequest).filter(PartsRequest.id == req_id).first()
+    if not pr:
+        raise HTTPException(status_code=404, detail="Demande introuvable")
+    if pr.status != "pending":
+        raise HTTPException(status_code=400, detail=f"Demande déjà {pr.status}")
+
+    reason = reject_data.get("reason", "").strip()
+    if not reason:
+        raise HTTPException(status_code=400, detail="Motif de refus obligatoire")
+
+    pr.status = "rejected"
+    pr.rejection_reason = reason
+    pr.approved_by = current_user.id
+    pr.approved_at = datetime.utcnow().strftime("%Y-%m-%d %H:%M")
+
+    db.commit()
+
+    return {
+        "status": "rejected",
+        "request_id": pr.id,
+        "reason": reason,
+        "message": "Demande refusée",
+    }

@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { db } from '../lib/db';
 
 const apiBaseUrl = typeof window !== 'undefined'
     ? `http://${window.location.hostname}:4000/api`
@@ -16,14 +17,18 @@ api.interceptors.request.use(cfg => {
 api.interceptors.response.use(
     (response) => response,
     (error) => {
-        // Broadcast custom event so a global Toast listener can catch it
         if (typeof window !== 'undefined' && error.response) {
             const status = error.response.status;
             let message = error.response.data?.detail || "Une erreur est survenue côté serveur.";
+            if (Array.isArray(message)) message = message.map((err: any) => err.msg).join(', ');
 
-            // Format FastAPI validation errors
-            if (Array.isArray(message)) {
-                message = message.map(err => err.msg).join(', ');
+            // Handle 401 Unauthorized globally
+            if (status === 401) {
+                localStorage.removeItem('token');
+                localStorage.removeItem('user');
+                if (!window.location.pathname.includes('/login')) {
+                    window.location.href = '/login';
+                }
             }
 
             if (status >= 400) {
@@ -35,57 +40,182 @@ api.interceptors.response.use(
     }
 );
 
+// ────────────────────────────────────────────
+// Offline Wrapper Helpers
+// ────────────────────────────────────────────
+
+async function handleGet(endpoint: string, table?: any) {
+    const isOnline = typeof window !== 'undefined' && navigator.onLine;
+
+    // If we have a table, try to serve from cache first ONLY if truly offline
+    if (typeof window !== 'undefined' && !isOnline && table) {
+        return await table.toArray();
+    }
+
+    try {
+        const res = await api.get(endpoint);
+        // Background update of IndexedDB if table is provided
+        if (table && Array.isArray(res.data) && typeof window !== 'undefined') {
+            try {
+                await table.clear();
+                await table.bulkAdd(res.data);
+            } catch (dbErr) {
+                console.warn(`Dexie Bulk Sync Error on ${endpoint}:`, dbErr);
+                // If bulk fails, try put individually to recover
+                for (const item of res.data) {
+                    await table.put(item).catch(() => {});
+                }
+            }
+        }
+        return res.data;
+    } catch (err: any) {
+        // If 401, DON'T fallback to local data, let the interceptor handle it
+        if (err.response?.status === 401) throw err;
+
+        // If offline or network error, fallback to cache
+        if (table) return await table.toArray();
+        throw err;
+    }
+}
+
+async function handlePost(endpoint: string, data: any, actionType: any) {
+    if (typeof window !== 'undefined' && !navigator.onLine) {
+        await db.syncQueue.add({
+            type: actionType,
+            endpoint,
+            method: 'POST',
+            payload: data,
+            timestamp: Date.now(),
+            status: 'pending'
+        });
+        
+        // Return a optimistic response
+        return { message: "Action enregistrée en local (Hors ligne)", offline: true, ...data };
+    }
+    const res = await api.post(endpoint, data);
+    return res.data;
+}
+
+// ────────────────────────────────────────────
+// GMAO API EXPORTS
+// ────────────────────────────────────────────
+
 export const gmaoApi = {
-    getMachines: async () => {
-        const res = await api.get('/machines');
-        return res.data;
-    },
-    getStock: async () => {
-        const res = await api.get('/stock');
-        return res.data;
-    },
-    getWorkOrders: async () => {
-        const res = await api.get('/work-orders');
-        return res.data;
-    },
-    getStats: async () => {
-        const res = await api.get('/stats');
-        return res.data;
-    },
+    getMachines: () => handleGet('/machines', db.machines),
+    getStock: () => handleGet('/stock', db.stock),
+    getWorkOrders: () => handleGet('/work-orders', db.workOrders),
+    getStats: () => handleGet('/stats'),
+    
     getWorkOrder: async (id: string | number) => {
-        const res = await api.get(`/work-orders/${id}`);
-        return res.data;
+        try {
+            const res = await api.get(`/work-orders/${id}`);
+            return res.data;
+        } catch (err) {
+            // Fallback to local search if specific WO fetch fails
+            const local = await db.workOrders.get({ id: Number(id) });
+            if (local) return local;
+            throw err;
+        }
     },
-    createWorkOrder: async (data: any) => {
-        const res = await api.post('/work-orders', data);
-        return res.data;
-    },
+
+    createWorkOrder: (data: any) => handlePost('/work-orders', data, 'CREATE_WORK_ORDER'),
+    
     orderStock: async (itemId: number, quantity: number) => {
-        const res = await api.post('/stock/order', { itemId, quantity });
-        return res.data;
+        return handlePost('/stock/order', { itemId, quantity }, 'UPDATE_WORK_ORDER');
     },
+
     updateWorkOrder: async (id: number | string, data: any) => {
+        if (typeof window !== 'undefined' && !navigator.onLine) {
+            await db.syncQueue.add({
+                type: 'UPDATE_WORK_ORDER',
+                endpoint: `/work-orders/${id}`,
+                method: 'PATCH',
+                payload: data,
+                timestamp: Date.now(),
+                status: 'pending'
+            });
+            return { offline: true };
+        }
         const res = await api.patch(`/work-orders/${id}`, data);
         return res.data;
     },
+
     getMachineWorkOrders: async (machineId: number) => {
+        // Simple filter on local workOrders if offline
+        if (!navigator.onLine) {
+             return (await db.workOrders.toArray()).filter(wo => wo.equipment_id === machineId);
+        }
         const res = await api.get(`/machines/${machineId}/work-orders`);
         return res.data;
     },
-    addWorkOrderPart: async (woId: number | string, data: { part_code: string, quantity: number }) => {
-        const res = await api.post(`/work-orders/${woId}/parts`, data);
+
+    addWorkOrderPart: (woId: number | string, data: any) => 
+        handlePost(`/work-orders/${woId}/parts`, data, 'ADD_PART'),
+
+    getMachineMaintenanceStatus: (machineId: number) => 
+        handleGet(`/machines/${machineId}/maintenance-status`),
+
+    triggerMaintenance: (machineId: number) => 
+        handlePost(`/machines/${machineId}/trigger-maintenance`, {}, 'CREATE_WORK_ORDER'),
+
+    getReliabilityKpis: () => handleGet('/kpi-reliability'),
+    getTechnicians: () => handleGet('/technicians', db.technicians),
+
+    // MANAGER
+    getManagerStats: async () => {
+        if (typeof window !== 'undefined' && !navigator.onLine) {
+            const cached = await db.table('stats').get('manager_stats');
+            return cached ? cached.data : null;
+        }
+        try {
+            const res = await api.get('/manager-stats');
+            if (typeof window !== 'undefined') {
+                await db.table('stats').put({ key: 'manager_stats', data: res.data });
+            }
+            return res.data;
+        } catch (err) {
+            const cached = await db.table('stats').get('manager_stats');
+            return cached ? cached.data : null;
+        }
+    },
+    getManagerTechnicians: () => handleGet('/manager/technicians'),
+    getTechnicianStats: (techId: number) => handleGet(`/manager/technicians/${techId}/stats`),
+    getTechnicianWorkOrders: (techId: number) => handleGet(`/manager/technicians/${techId}/work-orders`),
+    
+    // MAGASINIER
+    createPartsRequest: (data: any) => handlePost('/parts-requests', data, 'CREATE_PARTS_REQUEST'),
+    getPartsRequests: (statusFilter?: string) => {
+        const endpoint = statusFilter ? `/parts-requests?status_filter=${statusFilter}` : '/parts-requests';
+        return handleGet(endpoint, db.partsRequests);
+    },
+    approvePartsRequest: async (reqId: number) => {
+        if (typeof window !== 'undefined' && !navigator.onLine) {
+            await db.syncQueue.add({
+                type: 'UPDATE_WORK_ORDER', 
+                endpoint: `/parts-requests/${reqId}/approve`,
+                method: 'PATCH',
+                payload: {},
+                timestamp: Date.now(),
+                status: 'pending'
+            });
+            return { offline: true };
+        }
+        const res = await api.patch(`/parts-requests/${reqId}/approve`, {});
         return res.data;
     },
-    getMachineMaintenanceStatus: async (machineId: number) => {
-        const res = await api.get(`/machines/${machineId}/maintenance-status`);
-        return res.data;
-    },
-    triggerMaintenance: async (machineId: number) => {
-        const res = await api.post(`/machines/${machineId}/trigger-maintenance`);
-        return res.data;
-    },
-    getReliabilityKpis: async () => {
-        const res = await api.get('/kpi-reliability');
+    rejectPartsRequest: async (reqId: number, reason: string) => {
+        if (typeof window !== 'undefined' && !navigator.onLine) {
+            await db.syncQueue.add({
+                type: 'UPDATE_WORK_ORDER', 
+                endpoint: `/parts-requests/${reqId}/reject`,
+                method: 'PATCH',
+                payload: { reason },
+                timestamp: Date.now(),
+                status: 'pending'
+            });
+            return { offline: true };
+        }
+        const res = await api.patch(`/parts-requests/${reqId}/reject`, { reason });
         return res.data;
     },
 };

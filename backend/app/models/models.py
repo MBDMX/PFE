@@ -10,6 +10,8 @@ class User(Base):
     password_hash = Column(String, nullable=False)
     role = Column(String, nullable=False)
     name = Column(String)
+    manager_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    team = Column(String, nullable=True)
 
 class Machine(Base):
     __tablename__ = "machines"
@@ -48,6 +50,7 @@ class WorkOrder(Base):
     solution_applied = Column(Text)
     comments = Column(Text)
     created_by = Column(Integer)
+    created_at = Column(String)
     
     parts = relationship("WorkOrderPart", back_populates="work_order")
 
@@ -74,3 +77,29 @@ class Stock(Base):
     image = Column(String)
     synonyms = Column(String)
     unit_price = Column(Float, default=0.0)
+
+class PartsRequest(Base):
+    __tablename__ = "parts_requests"
+    id = Column(Integer, primary_key=True, index=True)
+    work_order_id = Column(Integer, ForeignKey("work_orders.id"))
+    requested_by = Column(Integer, ForeignKey("users.id"))
+    status = Column(String, default="pending")  # pending / approved / rejected
+    rejection_reason = Column(Text, nullable=True)
+    approved_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at = Column(String)
+    approved_at = Column(String, nullable=True)
+
+    items = relationship("PartsRequestItem", back_populates="request")
+    work_order = relationship("WorkOrder")
+
+class PartsRequestItem(Base):
+    __tablename__ = "parts_request_items"
+    id = Column(Integer, primary_key=True, index=True)
+    request_id = Column(Integer, ForeignKey("parts_requests.id"))
+    part_code = Column(String)
+    part_name = Column(String)
+    quantity_requested = Column(Integer)
+    quantity_approved = Column(Integer, nullable=True)
+
+    request = relationship("PartsRequest", back_populates="items")
+

@@ -62,14 +62,18 @@ export default function StockPage() {
     return () => clearTimeout(timer);
   }, [searchTerm, allItems]);
 
-  const canOrder = userRole === 'admin' || userRole === 'manager';
+  const canOrder = userRole === 'admin' || userRole === 'manager' || userRole === 'magasinier';
 
   const handleOrder = async (item: StockItem) => {
     try {
-      await gmaoApi.orderStock(item.id, 1);
-      success('Commande transmise', `${item.name} — SAP confirmé`);
-      const data = await gmaoApi.getStock();
-      setAllItems(data);
+      const res = await gmaoApi.orderStock(item.id, 1);
+      if (res.offline) {
+        success('Mode Hors-Ligne', `${item.name} ajouté à la file de synchronisation.`);
+      } else {
+        success('Commande transmise', `${item.name} — SAP confirmé`);
+        const data = await gmaoApi.getStock();
+        setAllItems(data);
+      }
     } catch {
       toastError('Échec de la commande', 'Vérifiez la connexion SAP');
     }

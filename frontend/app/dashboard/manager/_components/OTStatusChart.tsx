@@ -19,7 +19,7 @@ export default function OTStatusChart({ stats }: Props) {
             <h2 className="text-sm font-black text-slate-300 uppercase tracking-widest mb-1">Répartition OT</h2>
             <p className="text-xs text-slate-600 mb-4">Par statut · {stats.totalOT} ordres au total</p>
             <div className="h-[220px] w-full">
-                <ResponsiveContainer width="100%" height="100%">
+                <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
                     <PieChart>
                         <Pie
                             data={data}

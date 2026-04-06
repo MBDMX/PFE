@@ -10,6 +10,7 @@ const ROLE_ROUTES: Record<string, string> = {
   admin: '/dashboard/admin',
   technician: '/dashboard/technician',
   manager: '/dashboard/manager',
+  magasinier: '/dashboard/magasinier',
 };
 
 export default function LoginPage() {

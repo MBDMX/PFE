@@ -17,7 +17,7 @@ import {
   X,
   ChevronRight
 } from 'lucide-react';
-import api from '@/services/api';
+import { gmaoApi } from '@/services/api';
 
 type Priority = 'low' | 'medium' | 'high' | 'critical';
 type WOStatus = 'open' | 'in_progress' | 'done' | 'closed';
@@ -43,8 +43,8 @@ export default function WorkOrdersPage() {
     const fetchOrders = async () => {
         setLoading(true);
         try {
-            const res = await api.get('/work-orders');
-            setOrders(res.data);
+            const data = await gmaoApi.getWorkOrders();
+            setOrders(data);
         } catch (err) {
             console.error("Erreur chargement interventions:", err);
         } finally {

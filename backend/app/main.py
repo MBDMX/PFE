@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.api import auth, gmao
 from app.db.session import engine, Base, SessionLocal
-from app.models.models import User, Machine, Stock, WorkOrder, WorkOrderPart
+from app.models.models import User, Machine, Stock, WorkOrder, WorkOrderPart, PartsRequest, PartsRequestItem
 from app.core.security import get_password_hash
 
 # Initialize Database
@@ -26,8 +26,9 @@ def seed_data():
         # Seeding with Emails for the new auth system
         db.add_all([
             User(username="admin", email="admin@gmao-pro.com", password_hash=get_password_hash("admin123"), role="admin", name="Admin Principal"),
-            User(username="manager", email="manager@gmao-pro.com", password_hash=get_password_hash("mgr123"), role="manager", name="Chef Maintenance"),
-            User(username="tech1", email="tech1@gmao-pro.com", password_hash=get_password_hash("tech123"), role="technician", name="Technicien #1"),
+            User(username="manager", email="manager@gmao-pro.com", password_hash=get_password_hash("mgr123"), role="manager", name="Chef Maintenance", team="Direction"),
+            User(username="tech1", email="tech1@gmao-pro.com", password_hash=get_password_hash("tech123"), role="technician", name="Technicien #1", manager_id=2, team="Maint-Meca"),
+            User(username="magasinier1", email="mag@gmao-pro.com", password_hash=get_password_hash("mag123"), role="magasinier", name="Magasinier Central"),
         ])
         db.add_all([
             Machine(name="Compresseur A1", reference="COMP-001", location="Atelier Nord", status="operational", health_score=85),

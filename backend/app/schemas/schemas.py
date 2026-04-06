@@ -11,6 +11,7 @@ class UserCreate(BaseModel):
     password: str = Field(..., min_length=8)
     role: str
     name: str
+    manager_id: Optional[int] = None
 
 class UserOut(BaseModel):
     id: int
@@ -18,6 +19,8 @@ class UserOut(BaseModel):
     email: str
     role: str
     name: str
+    manager_id: Optional[int] = None
+    team: Optional[str] = None
     model_config = ConfigDict(from_attributes=True)
 
 class Token(BaseModel):
@@ -80,6 +83,7 @@ class WorkOrder(BaseModel):
     solution_applied: Optional[str] = None
     comments: Optional[str] = None
     created_by: Optional[int] = None
+    created_at: Optional[str] = None
     
     parts: Optional[List[WorkOrderPart]] = []
     
@@ -107,3 +111,28 @@ class ManagerStats(BaseModel):
     avgMachineHealth: int
     resolutionRate: int
     dueMaintenance: int # Alerts for maintenance due soon
+
+class PartsRequestItemOut(BaseModel):
+    id: int
+    part_code: str
+    part_name: str
+    quantity_requested: int
+    quantity_approved: Optional[int] = None
+    model_config = ConfigDict(from_attributes=True)
+
+class PartsRequestOut(BaseModel):
+    id: int
+    work_order_id: int
+    requested_by: int
+    status: str
+    rejection_reason: Optional[str] = None
+    approved_by: Optional[int] = None
+    created_at: Optional[str] = None
+    approved_at: Optional[str] = None
+    items: List[PartsRequestItemOut] = []
+    # Enriched fields (added in the endpoint)
+    requester_name: Optional[str] = None
+    work_order_title: Optional[str] = None
+    work_order_sap_id: Optional[str] = None
+    model_config = ConfigDict(from_attributes=True)
+

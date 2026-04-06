@@ -95,8 +95,8 @@ export default function MachinesPage() {
     const fetchMachines = async () => {
         setLoading(true);
         try {
-            const res = await api.get('/machines');
-            setMachines(res.data);
+            const data = await gmaoApi.getMachines();
+            setMachines(data);
         } catch (err) {
             console.error("Erreur chargement machines:", err);
         } finally {

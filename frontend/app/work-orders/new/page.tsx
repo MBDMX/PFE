@@ -11,7 +11,11 @@ import {
   AlertCircle,
   MapPin,
   Users,
-  Wrench
+  Wrench,
+  Package,
+  Plus,
+  Trash2,
+  Clock
 } from 'lucide-react';
 import { gmaoApi } from '@/services/api';
 import { useToast } from '@/components/ui/toast';
@@ -21,8 +25,11 @@ export default function NewWorkOrder() {
   const searchParams = useSearchParams();
   const [loading, setLoading] = useState(false);
   const [machines, setMachines] = useState<any[]>([]);
+  const [allTechnicians, setAllTechnicians] = useState<any[]>([]);
+  const [stock, setStock] = useState<any[]>([]);
   const { success } = useToast();
   
+  // Local Form State
   const [formData, setFormData] = useState({
     title: '',
     description: '',
@@ -31,67 +38,118 @@ export default function NewWorkOrder() {
     priority: 'medium',
     location: '',
     team: '',
+    technicianId: '',
+    responsiblePerson: '',
     startDate: new Date().toISOString().split('T')[0],
-    endDate: new Date().toISOString().split('T')[0]
+    endDate: new Date().toISOString().split('T')[0],
+    createdAt: new Date().toISOString().slice(0, 16) // "YYYY-MM-DDTHH:mm"
   });
 
+  // Spare Parts Logic
+  const [selectedParts, setSelectedParts] = useState<any[]>([]);
+  const [currentPartCode, setCurrentPartCode] = useState('');
+  const [currentPartQty, setCurrentPartQty] = useState(1);
+
   useEffect(() => {
-    const loadMachines = async () => {
+    const loadInitialData = async () => {
       try {
-        const data = await gmaoApi.getMachines();
-        setMachines(data);
-        // If equipmentId was pre-filled from query, find its location
+        const [mats, techs, items] = await Promise.all([
+          gmaoApi.getMachines(),
+          gmaoApi.getTechnicians(),
+          gmaoApi.getStock()
+        ]);
+        setMachines(mats);
+        setAllTechnicians(techs);
+        setStock(items);
+
+        // Prefill location if machine is in query
         const prefillRef = searchParams.get('machine');
         if (prefillRef) {
-          const machine = data.find((m: any) => m.reference === prefillRef);
+          const machine = mats.find((m: any) => m.reference === prefillRef);
           if (machine) setFormData(prev => ({...prev, location: machine.location}));
         }
       } catch (err) {
-        console.error("Failed to load machines", err);
+        console.error("Failed to load data", err);
       }
     };
-    loadMachines();
+    loadInitialData();
   }, [searchParams]);
+
+  // Filter technicians based on selected team
+  const filteredTechs = allTechnicians.filter(t => t.team === formData.team);
+
+  const handleAddPart = () => {
+    if (!currentPartCode) return;
+    const part = stock.find(s => s.reference === currentPartCode);
+    if (!part) return;
+
+    const existingIndex = selectedParts.findIndex(p => p.part_code === currentPartCode);
+    if (existingIndex >= 0) {
+      const updated = [...selectedParts];
+      updated[existingIndex].quantity += currentPartQty;
+      setSelectedParts(updated);
+    } else {
+      setSelectedParts([...selectedParts, { 
+        part_code: part.reference, 
+        part_name: part.name, 
+        quantity: currentPartQty 
+      }]);
+    }
+    setCurrentPartCode('');
+    setCurrentPartQty(1);
+  };
+
+  const handleRemovePart = (code: string) => {
+    setSelectedParts(selectedParts.filter(p => p.part_code !== code));
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     try {
-      const res = await gmaoApi.createWorkOrder(formData);
-      success('Ordre de Travail créé', `${res.sap_order_id || 'SAP Confirmation'} enregistré.`);
+      const payload = {
+        ...formData,
+        parts: selectedParts
+      };
+      const res = await gmaoApi.createWorkOrder(payload);
+      if (res.offline) {
+        success('Mode Hors-Ligne', 'L\'ordre de travail est enregistré localement.');
+      } else {
+        success('Ordre de Travail créé', `${res.sap_order_id || 'SAP Confirmation'} enregistré.`);
+      }
       router.push('/work-orders');
     } catch (err) {
-      // Handled by global interceptor
       setLoading(false);
     }
   };
 
   return (
-    <div className="animate-in fade-in slide-in-from-bottom-4 duration-700 max-w-4xl mx-auto py-8 px-4">
+    <div className="animate-in fade-in slide-in-from-bottom-4 duration-700 max-w-5xl mx-auto py-12 px-6">
       {/* Header */}
-      <div className="flex items-center gap-4 mb-10">
+      <div className="flex items-center gap-6 mb-12">
         <button 
           onClick={() => router.push('/work-orders')}
-          className="size-11 rounded-xl bg-white/5 hover:bg-white/10 flex items-center justify-center text-slate-400 hover:text-white transition-all border border-white/5 shadow-inner"
+          className="size-14 rounded-2xl bg-white/5 hover:bg-white/10 flex items-center justify-center text-slate-400 hover:text-white transition-all border border-white/5 shadow-xl"
         >
-          <ArrowLeft size={22} />
+          <ArrowLeft size={28} />
         </button>
         <div>
-          <h1 className="text-3xl font-black bg-gradient-to-r from-white to-slate-400 bg-clip-text text-transparent tracking-tight">Nouvel Ordre de Travail</h1>
-          <p className="text-sm font-bold text-slate-500 uppercase tracking-widest mt-1">Génération d'une demande d'intervention SAP</p>
+          <h1 className="text-4xl font-black bg-gradient-to-r from-white to-slate-400 bg-clip-text text-transparent tracking-tight">Nouvel Ordre de Travail</h1>
+          <p className="text-sm font-bold text-slate-500 uppercase tracking-widest mt-2">Génération d'une demande d'intervention avancée (SAP)</p>
         </div>
       </div>
 
-      <form onSubmit={handleSubmit} className="space-y-6">
-        {/* Main Info Card */}
-        <div className="azure-card p-8 space-y-8">
-          <div className="space-y-2">
-            <label className="text-[0.65rem] font-black text-slate-500 uppercase tracking-[0.2em] ml-1">Titre de l'Intervention</label>
+      <form onSubmit={handleSubmit} className="space-y-8">
+        
+        {/* ── Section 1: Informations Principales ── */}
+        <div className="azure-card p-10 space-y-10">
+          <div className="space-y-4">
+            <label className="text-[0.75rem] font-black text-slate-500 uppercase tracking-[0.25em] ml-1">Titre de l'Intervention</label>
             <div className="relative group">
-              <FileText className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500 group-focus-within:text-blue-400 transition-colors" size={18} />
+              <FileText className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-500 group-focus-within:text-blue-400 transition-colors" size={20} />
               <input 
                 required
-                className="w-full bg-slate-950/50 border border-white/10 rounded-2xl py-4 pl-12 pr-4 text-white focus:outline-none focus:border-blue-500/50 transition-all font-bold text-lg"
+                className="w-full bg-slate-950/50 border border-white/10 rounded-2xl py-5 pl-14 pr-6 text-white focus:outline-none focus:border-blue-500/50 transition-all font-bold text-xl placeholder:text-slate-600"
                 placeholder="ex: Réparation fuite d'huile - Presse Hydraulique P5"
                 value={formData.title}
                 onChange={(e) => setFormData({...formData, title: e.target.value})}
@@ -99,14 +157,14 @@ export default function NewWorkOrder() {
             </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div className="space-y-2">
-              <label className="text-[0.65rem] font-black text-slate-500 uppercase tracking-[0.2em] ml-1">Équipement / Machine</label>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+            <div className="space-y-4">
+              <label className="text-[0.75rem] font-black text-slate-500 uppercase tracking-[0.25em] ml-1">Machine / Équipement</label>
               <div className="relative group">
-                <Wrench className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500 group-focus-within:text-blue-400 transition-colors" size={18} />
+                <Wrench className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-500 group-focus-within:text-blue-400 transition-colors" size={20} />
                 <select 
                   required
-                  className="w-full bg-slate-950/50 border border-white/10 rounded-2xl py-4 pl-12 pr-4 text-white focus:outline-none focus:border-blue-500/50 transition-all font-bold appearance-none cursor-pointer"
+                  className="w-full bg-slate-950/50 border border-white/10 rounded-2xl py-5 pl-14 pr-6 text-white focus:outline-none focus:border-blue-500/50 transition-all font-bold text-lg appearance-none cursor-pointer"
                   value={formData.equipmentId}
                   onChange={(e) => {
                     const machine = machines.find(m => m.reference === e.target.value);
@@ -121,13 +179,13 @@ export default function NewWorkOrder() {
               </div>
             </div>
 
-            <div className="space-y-2">
-              <label className="text-[0.65rem] font-black text-slate-500 uppercase tracking-[0.2em] ml-1">Localisation Technique</label>
+            <div className="space-y-4">
+              <label className="text-[0.75rem] font-black text-slate-500 uppercase tracking-[0.25em] ml-1">Localisation</label>
               <div className="relative group">
-                <MapPin className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500 group-focus-within:text-blue-400 transition-colors" size={18} />
+                <MapPin className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-500 group-focus-within:text-blue-400 transition-colors" size={20} />
                 <input 
-                  className="w-full bg-slate-950/50 border border-white/10 rounded-2xl py-4 pl-12 pr-4 text-white focus:outline-none focus:border-blue-500/50 transition-all font-bold"
-                  placeholder="ex: Atelier Nord - Zone A"
+                  className="w-full bg-slate-950/50 border border-white/10 rounded-2xl py-5 pl-14 pr-6 text-white focus:outline-none focus:border-blue-500/50 transition-all font-bold text-lg"
+                  placeholder="Atelier Nord - Zone A"
                   value={formData.location}
                   onChange={(e) => setFormData({...formData, location: e.target.value})}
                 />
@@ -135,131 +193,176 @@ export default function NewWorkOrder() {
             </div>
           </div>
 
-          <div className="space-y-2">
-            <label className="text-[0.65rem] font-black text-slate-500 uppercase tracking-[0.2em] ml-1">Description du Problème / Travaux</label>
+          <div className="space-y-4">
+            <label className="text-[0.75rem] font-black text-slate-500 uppercase tracking-[0.25em] ml-1">Description Technique</label>
             <textarea 
               rows={4}
-              className="w-full bg-slate-950/50 border border-white/10 rounded-2xl p-4 text-white focus:outline-none focus:border-blue-500/50 transition-all font-medium leading-relaxed"
-              placeholder="Décrivez les symptômes de la panne ou les tâches de maintenance préventive à effectuer..."
+              className="w-full bg-slate-950/50 border border-white/10 rounded-2xl p-6 text-white focus:outline-none focus:border-blue-500/50 transition-all font-medium text-lg leading-relaxed placeholder:text-slate-600"
+              placeholder="Détaillez les symptômes observés ou les travaux planifiés..."
               value={formData.description}
               onChange={(e) => setFormData({...formData, description: e.target.value})}
             />
           </div>
         </div>
 
-        {/* Configuration Card */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <div className="azure-card p-6 space-y-6">
-            <div className="flex items-center gap-2 mb-2 border-b border-white/5 pb-3">
-              <Settings size={16} className="text-blue-400" />
-              <h2 className="text-xs font-black text-white uppercase tracking-widest">Paramètres d'Intervention</h2>
+        {/* ── Section 2: Assignation & Pièces ── */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+          
+          {/* Assignment Card */}
+          <div className="azure-card p-10 space-y-8">
+            <div className="flex items-center gap-3 mb-2 border-b border-white/5 pb-5">
+              <Users size={24} className="text-violet-400" />
+              <h2 className="text-sm font-black text-white uppercase tracking-widest">Assignation d'Équipe</h2>
             </div>
             
-            <div className="space-y-2">
-              <label className="text-[0.6rem] font-black text-slate-500 uppercase tracking-[0.2em] ml-1">Type d'Ordre</label>
-              <div className="grid grid-cols-2 gap-2">
-                {['corrective', 'preventive'].map(t => (
-                  <button
-                    key={t}
-                    type="button"
-                    onClick={() => setFormData({...formData, type: t})}
-                    className={`py-3 rounded-xl border font-bold text-xs uppercase tracking-widest transition-all ${
-                      formData.type === t ? 'bg-blue-600/20 border-blue-500 text-blue-400' : 'bg-slate-950/50 border-white/5 text-slate-500 hover:border-white/20'
-                    }`}
-                  >
-                    {t === 'corrective' ? 'Correctif' : 'Préventif'}
-                  </button>
-                ))}
-              </div>
+            <div className="space-y-4">
+              <label className="text-[0.7rem] font-black text-slate-500 uppercase tracking-[0.2em]">Équipe Responsable</label>
+              <select 
+                className="w-full bg-slate-950 border border-white/10 rounded-2xl py-4 px-5 text-white focus:outline-none focus:border-violet-500/50 font-bold text-base appearance-none"
+                value={formData.team}
+                onChange={(e) => setFormData({...formData, team: e.target.value, technicianId: '', responsiblePerson: ''})}
+              >
+                <option value="">Sélectionner une équipe</option>
+                <option value="Maint-Meca">🔧 Équipe Mécanique</option>
+                <option value="Maint-Elec">⚡ Équipe Électrique</option>
+                <option value="Maint-Hydrique">💧 Équipe Hydraulique</option>
+                <option value="Utility-Hvac">❄️ Équipe HVAC</option>
+              </select>
             </div>
 
-            <div className="space-y-2">
-              <label className="text-[0.6rem] font-black text-slate-500 uppercase tracking-[0.2em] ml-1">Priorité</label>
-              <div className="grid grid-cols-4 gap-2">
-                {['low', 'medium', 'high', 'critical'].map(p => (
-                  <button
-                    key={p}
-                    type="button"
-                    onClick={() => setFormData({...formData, priority: p})}
-                    className={`py-3 rounded-xl border font-bold text-[0.6rem] uppercase tracking-widest transition-all ${
-                      formData.priority === p 
-                        ? p === 'critical' ? 'bg-rose-600/20 border-rose-500 text-rose-400' : 'bg-blue-600/20 border-blue-500 text-blue-400'
-                        : 'bg-slate-950/50 border-white/5 text-slate-500 hover:border-white/20'
-                    }`}
+            {formData.team && (
+              <div className="space-y-4 animate-in fade-in slide-in-from-top-2 duration-300">
+                <label className="text-[0.7rem] font-black text-slate-500 uppercase tracking-[0.2em]">Intervenant Associé</label>
+                <div className="relative">
+                  <select 
+                    required
+                    className="w-full bg-slate-950 border border-white/10 rounded-2xl py-4 px-5 text-white focus:outline-none focus:border-violet-500/50 font-bold text-base appearance-none"
+                    value={formData.technicianId}
+                    onChange={(e) => {
+                      const tech = allTechnicians.find(t => t.id === Number(e.target.value));
+                      setFormData({...formData, technicianId: e.target.value, responsiblePerson: tech?.name || ''});
+                    }}
                   >
-                    {p}
-                  </button>
-                ))}
+                    <option value="">Choisir un membre de l'équipe ({filteredTechs.length})</option>
+                    {filteredTechs.map(t => (
+                      <option key={t.id} value={t.id}>{t.name}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            )}
+
+            <div className="pt-4 space-y-4">
+              <div className="flex items-center gap-2 mb-2 border-b border-white/5 pb-3">
+                <Clock size={20} className="text-amber-400" />
+                <h2 className="text-xs font-black text-white uppercase tracking-widest">Horodatage de l'Intervention</h2>
+              </div>
+              <div className="space-y-3">
+                <label className="text-[0.7rem] font-black text-slate-500 uppercase tracking-[0.2em]">Date et Heure exactes</label>
+                <input 
+                  type="datetime-local"
+                  className="w-full bg-slate-950/50 border border-white/10 rounded-2xl py-4 px-5 text-white font-bold text-base focus:border-amber-500/50"
+                  value={formData.createdAt}
+                  onChange={(e) => setFormData({...formData, createdAt: e.target.value})}
+                />
               </div>
             </div>
           </div>
 
-          <div className="azure-card p-6 space-y-6">
-            <div className="flex items-center gap-2 mb-2 border-b border-white/5 pb-3">
-              <Calendar size={16} className="text-purple-400" />
-              <h2 className="text-xs font-black text-white uppercase tracking-widest">Planification</h2>
+          {/* Spare Parts Card */}
+          <div className="azure-card p-10 flex flex-col">
+            <div className="flex items-center gap-3 mb-6 border-b border-white/5 pb-5">
+              <Package size={24} className="text-emerald-400" />
+              <h2 className="text-sm font-black text-white uppercase tracking-widest">Pièces de Rechange Requises</h2>
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <label className="text-[0.6rem] font-black text-slate-500 uppercase tracking-[0.2em] ml-1">Début Prévu</label>
-                <input 
-                  type="date"
-                  className="w-full bg-slate-950/50 border border-white/10 rounded-xl p-3 text-white focus:outline-none focus:border-blue-500/50 transition-all font-bold text-xs"
-                  value={formData.startDate}
-                  onChange={(e) => setFormData({...formData, startDate: e.target.value})}
-                />
-              </div>
-              <div className="space-y-2">
-                <label className="text-[0.6rem] font-black text-slate-500 uppercase tracking-[0.2em] ml-1">Fin Prévue</label>
-                <input 
-                  type="date"
-                  className="w-full bg-slate-950/50 border border-white/10 rounded-xl p-3 text-white focus:outline-none focus:border-blue-500/50 transition-all font-bold text-xs"
-                  value={formData.endDate}
-                  onChange={(e) => setFormData({...formData, endDate: e.target.value})}
-                />
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <label className="text-[0.6rem] font-black text-slate-500 uppercase tracking-[0.2em] ml-1">Équipe Responsable</label>
-              <div className="relative group">
-                <Users className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 group-focus-within:text-blue-400 transition-colors" size={14} />
+            <div className="grid grid-cols-3 gap-3 mb-6">
+              <div className="col-span-2">
                 <select 
-                  className="w-full bg-slate-950/50 border border-white/10 rounded-xl py-3 pl-10 pr-4 text-white focus:outline-none focus:border-blue-500/50 transition-all font-bold text-xs appearance-none"
-                  value={formData.team}
-                  onChange={(e) => setFormData({...formData, team: e.target.value})}
+                  className="w-full bg-slate-950 border border-white/10 rounded-[1.25rem] py-4 px-5 text-white text-sm font-bold appearance-none"
+                  value={currentPartCode}
+                  onChange={(e) => setCurrentPartCode(e.target.value)}
                 >
-                  <option value="">Sélectionner une équipe</option>
-                  <option value="Maint-Meca">Equipe Mécanique</option>
-                  <option value="Maint-Elec">Equipe Électrique</option>
-                  <option value="Maint-Hydrique">Equipe Hydraulique</option>
-                  <option value="Utility-Hvac">Equipe HVAC</option>
+                  <option value="">Chercher une pièce...</option>
+                  {stock.map(s => (
+                    <option key={s.id} value={s.reference}>{s.name} ({s.quantity} dispo)</option>
+                  ))}
                 </select>
               </div>
+              <div className="flex gap-2">
+                <input 
+                  type="number"
+                  min="1"
+                  className="w-full bg-slate-950 border border-white/10 rounded-xl py-4 px-4 text-white text-center font-bold"
+                  value={currentPartQty}
+                  onChange={(e) => setCurrentPartQty(Number(e.target.value))}
+                />
+                <button 
+                  type="button"
+                  onClick={handleAddPart}
+                  className="size-14 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl flex items-center justify-center shrink-0 transition-colors shadow-lg shadow-emerald-500/20"
+                >
+                  <Plus size={24} />
+                </button>
+              </div>
             </div>
+
+            <div className="flex-1 bg-slate-950/30 rounded-3xl border border-white/5 overflow-hidden">
+              <div className="max-h-[300px] overflow-y-auto px-4 py-2 custom-scrollbar">
+                {selectedParts.length === 0 ? (
+                  <div className="h-40 flex flex-col items-center justify-center text-slate-600 opacity-50 italic text-sm text-center">
+                    <Package size={32} className="mb-2" />
+                    Aucune pièce ajoutée
+                  </div>
+                ) : (
+                  <div className="space-y-2 py-4">
+                    {selectedParts.map((p) => (
+                      <div key={p.part_code} className="flex items-center justify-between p-4 bg-white/5 rounded-2xl border border-white/5 group">
+                        <div>
+                          <div className="text-sm font-bold text-white">{p.part_name}</div>
+                          <div className="text-[0.65rem] font-bold text-slate-500 uppercase tracking-widest">{p.part_code} × {p.quantity}</div>
+                        </div>
+                        <button 
+                          type="button"
+                          onClick={() => handleRemovePart(p.part_code)}
+                          className="size-10 rounded-xl hover:bg-rose-500/10 text-slate-600 hover:text-rose-500 flex items-center justify-center transition-all"
+                        >
+                          <Trash2 size={18} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+            
+            {selectedParts.length > 0 && (
+              <div className="mt-6 p-4 rounded-2xl bg-emerald-500/5 border border-emerald-500/10 text-emerald-500 text-[0.65rem] font-black uppercase tracking-widest text-center">
+                {selectedParts.length} article(s) à déduire du stock
+              </div>
+            )}
           </div>
         </div>
 
         {/* Action Buttons */}
-        <div className="flex gap-4 pt-6">
+        <div className="flex gap-6 pt-10">
           <button 
             type="button"
             onClick={() => router.push('/work-orders')}
-            className="flex-1 py-5 rounded-2xl bg-white/5 text-slate-400 font-black uppercase text-xs tracking-widest hover:bg-white/10 border border-white/5 transition-all flex items-center justify-center gap-2"
+            className="flex-1 py-6 rounded-[2rem] bg-white/5 text-slate-400 font-black uppercase text-sm tracking-[0.2em] hover:bg-white/10 border border-white/5 transition-all flex items-center justify-center gap-3"
           >
-            <X size={18} /> Annuler
+            <X size={20} /> Annuler
           </button>
           <button 
             type="submit"
             disabled={loading}
-            className="flex-[2] py-5 rounded-2xl bg-blue-600 text-white font-black uppercase text-xs tracking-widest shadow-lg shadow-blue-500/20 hover:bg-blue-500 transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed group"
+            className="flex-[2] py-6 rounded-[2rem] bg-blue-600 text-white font-black uppercase text-sm tracking-[0.2em] shadow-2xl shadow-blue-500/20 hover:bg-blue-500 transition-all flex items-center justify-center gap-3 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {loading ? (
-              <div className="animate-spin size-5 border-2 border-white/30 border-t-white rounded-full" />
+              <div className="animate-spin size-6 border-2 border-white/30 border-t-white rounded-full" />
             ) : (
               <>
-                <Save size={18} /> Créer l'Ordre de Travail (SAP)
+                <Save size={20} /> Transmettre l'Ordre à SAP
               </>
             )}
           </button>
@@ -267,10 +370,10 @@ export default function NewWorkOrder() {
       </form>
 
       {/* SAP Disclaimer */}
-      <div className="mt-10 flex items-center justify-center gap-3 px-6 py-4 rounded-2xl bg-amber-500/5 border border-amber-500/10 text-amber-500/60 max-w-2xl mx-auto">
-        <AlertCircle size={16} />
-        <p className="text-[0.65rem] font-bold uppercase tracking-widest leading-relaxed">
-          Attention : Cette action génère automatiquement un ID dans le cache SAP B1 via l'intégration RPA de la plateforme.
+      <div className="mt-12 flex items-center justify-center gap-4 px-10 py-6 rounded-3xl bg-amber-500/5 border border-amber-500/10 text-amber-500/60 max-w-3xl mx-auto">
+        <AlertCircle size={20} />
+        <p className="text-[0.7rem] font-black uppercase tracking-[0.15em] leading-relaxed text-center">
+          Système Connecté : Cette action génère un ID d'ordre permanent synchronisé avec SAP RPA.
         </p>
       </div>
     </div>
