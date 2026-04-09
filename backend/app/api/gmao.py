@@ -1,18 +1,38 @@
-from typing import List
+from typing import List, Optional
 from datetime import date, datetime
 import logging
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from app.db.session import get_db
-from app.models.models import Machine, Stock, WorkOrder, User, WorkOrderPart, WorkOrderStep, PartsRequest, PartsRequestItem, StockMovement
+from app.models.models import Machine, Stock, WorkOrder, User, WorkOrderPart, WorkOrderStep, PartsRequest, PartsRequestItem, StockMovement, WorkSession
 from app.api.deps import get_current_user, role_required
-from app.schemas.schemas import UserOut, Machine as MachineSchema, Stock as StockSchema, Stats, WorkOrder as WorkOrderSchema, ManagerStats, PartsRequestOut, WorkOrderStep as WorkOrderStepSchema, WorkOrderStepUpdate, MagasinierStats, StockMovement as StockMovementSchema
+from app.schemas.schemas import UserOut, Machine as MachineSchema, Stock as StockSchema, Stats, WorkOrder as WorkOrderSchema, ManagerStats, PartsRequestOut, WorkOrderStep as WorkOrderStepSchema, WorkOrderStepUpdate, MagasinierStats, StockMovement as StockMovementSchema, WorkSession as WorkSessionSchema, WorkSessionCreate, WorkOrderCreate
 
 router = APIRouter()
 
 @router.get("/ping")
 def ping():
     return {"ping": "pong"}
+
+@router.post("/system/reset")
+def reset_system(db: Session = Depends(get_db)):
+    # Only allow resetting the database state completely
+    db.query(StockMovement).delete()
+    db.query(PartsRequestItem).delete()
+    db.query(PartsRequest).delete()
+    db.query(WorkOrderStep).delete()
+    db.query(WorkOrderPart).delete()
+    db.query(WorkOrder).delete()
+    db.query(Stock).delete()
+    db.query(Machine).delete()
+    db.query(User).delete()
+    db.commit()
+    
+    # Reload original seed data
+    from app.db.seed import execute_seed_data
+    execute_seed_data(db)
+    
+    return {"status": "success", "message": "Système GMAO réinitialisé à zéro avec succès."}
 
 @router.get("/machines", response_model=List[MachineSchema])
 def get_machines(db: Session = Depends(get_db)):
@@ -38,84 +58,104 @@ def get_work_order(wo_id: int, db: Session = Depends(get_db)):
     return order
 
 @router.post("/work-orders", response_model=WorkOrderSchema)
-def create_work_order(order_data: dict, db: Session = Depends(get_db)):
-    # Generate a fake SAP ID for the V1 Demo (Simulating RPA/SAP sync)
-    last_id = db.query(WorkOrder).count() + 1056
-    sap_id = f"SAP-WO-{last_id}"
-    
-    new_wo = WorkOrder(
-        sap_order_id=sap_id,
-        title=order_data.get("title"),
-        description=order_data.get("description"),
-        type=order_data.get("type", "corrective"),
-        priority=order_data.get("priority", "medium"),
-        status="open",
-        technical_location=order_data.get("location"),
-        equipment_id=order_data.get("equipmentId"),
-        team=order_data.get("team"),
-        technician_id=order_data.get("technicianId"),
-        responsible_person=order_data.get("responsiblePerson"),
-        planned_start_date=order_data.get("startDate"),
-        planned_end_date=order_data.get("endDate"),
-        created_at=order_data.get("createdAt")
-    )
-    db.add(new_wo)
-    db.commit()
-    db.refresh(new_wo)
-    
-    # Handle initial spare parts if provided
-    parts_list = order_data.get("parts", [])
-    for p in parts_list:
-        p_code = p.get("part_code")
-        qty = p.get("quantity", 1)
-        if p_code:
-            item = db.query(Stock).filter(Stock.reference == p_code).first()
-            if item:
-                new_part = WorkOrderPart(
-                    work_order_id=new_wo.id,
-                    part_code=item.reference,
-                    part_name=item.name,
-                    quantity=qty,
-                    unit_price_at_consumption=item.unit_price,
-                    deducted=False # Will be deducted on closure or manual trigger
-                )
-                db.add(new_part)
-                
-    # Automatically create a PartsRequest for these initial parts
-    if parts_list:
-        pr = PartsRequest(
-            work_order_id=new_wo.id,
-            requested_by=order_data.get("requested_by", 1), # Default or current user if possible
-            status="pending",
-            created_at=datetime.utcnow().strftime("%Y-%m-%d %H:%M")
-        )
-        db.add(pr)
-        db.flush() # Get PR ID
-        for p in parts_list:
-            if p.get("part_code"):
-                pr_item = PartsRequestItem(
-                    request_id=pr.id,
-                    part_code=p["part_code"],
-                    part_name=p.get("part_name", ""),
-                    quantity_requested=p.get("quantity", 1)
-                )
-                db.add(pr_item)
-    
-    # Handle initial steps if provided
-    steps_list = order_data.get("steps", [])
-    for idx, s_desc in enumerate(steps_list):
-        if s_desc:
-            new_step = WorkOrderStep(
-                work_order_id=new_wo.id,
-                description=s_desc,
-                is_done=False,
-                order_index=idx
-            )
-            db.add(new_step)
+def create_work_order(
+    order_data: WorkOrderCreate, 
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    try:
+        # Generate a fake SAP ID for the V1 Demo (Simulating RPA/SAP sync)
+        last_id = db.query(WorkOrder).count() + 1056
+        sap_id = f"SAP-WO-{last_id}"
+        
+        # Cast technicianId to int if valid, else None
+        tech_id = None
+        if order_data.technicianId and order_data.technicianId.strip():
+            try:
+                tech_id = int(order_data.technicianId)
+            except ValueError:
+                pass
 
-    db.commit()
-    db.refresh(new_wo)
-    return new_wo
+        new_wo = WorkOrder(
+            sap_order_id=sap_id,
+            title=order_data.title,
+            description=order_data.description,
+            type=order_data.type,
+            priority=order_data.priority,
+            status="open",
+            technical_location=order_data.location,
+            equipment_id=order_data.equipmentId,
+            team=order_data.team,
+            technician_id=tech_id,
+            responsible_person=order_data.responsiblePerson,
+            planned_start_date=order_data.startDate,
+            planned_end_date=order_data.endDate,
+            created_at=order_data.createdAt or datetime.utcnow().strftime("%Y-%m-%d %H:%M"),
+            created_by=current_user.id
+        )
+        db.add(new_wo)
+        db.flush() # Secure the ID before adding related items
+        
+        # Handle initial spare parts if provided
+        parts_list = order_data.parts or []
+        for p in parts_list:
+            p_code = p.get("part_code")
+            qty = p.get("quantity", 1)
+            if p_code:
+                item = db.query(Stock).filter(Stock.reference == p_code).first()
+                if item:
+                    new_part = WorkOrderPart(
+                        work_order_id=new_wo.id,
+                        part_code=item.reference,
+                        part_name=item.name,
+                        quantity=qty,
+                        unit_price_at_consumption=item.unit_price,
+                        deducted=False 
+                    )
+                    db.add(new_part)
+                    
+        # Automatically create a PartsRequest for these initial parts
+        if parts_list:
+            pr = PartsRequest(
+                work_order_id=new_wo.id,
+                requested_by=current_user.id,
+                status="pending",
+                created_at=datetime.utcnow().strftime("%Y-%m-%d %H:%M")
+            )
+            db.add(pr)
+            db.flush() 
+            for p in parts_list:
+                if p.get("part_code"):
+                    pr_item = PartsRequestItem(
+                        request_id=pr.id,
+                        part_code=p["part_code"],
+                        part_name=p.get("part_name", ""),
+                        quantity_requested=p.get("quantity", 1)
+                    )
+                    db.add(pr_item)
+        
+        # Handle initial steps if provided
+        steps_list = order_data.steps or []
+        for idx, s_desc in enumerate(steps_list):
+            if s_desc:
+                new_step = WorkOrderStep(
+                    work_order_id=new_wo.id,
+                    description=s_desc,
+                    is_done=False,
+                    order_index=idx
+                )
+                db.add(new_step)
+
+        db.commit()
+        db.refresh(new_wo)
+        return new_wo
+    except Exception as e:
+        db.rollback()
+        logging.error(f"Error creating work order: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Erreur serveur lors de la création de l'OT: {str(e)}"
+        )
 
 @router.patch("/work-orders/steps/{step_id}/toggle", response_model=WorkOrderStepSchema)
 def toggle_work_order_step(
@@ -166,16 +206,17 @@ def get_manager_stats(db: Session = Depends(get_db)):
     )
     low_stock = db.query(Stock).filter(Stock.quantity <= 5).count()
     machines = db.query(Machine).all()
-    avg_health = round(
-        sum(m.health_score or 0 for m in machines) / len(machines)
-    ) if machines else 0
-    resolution_rate = round((done / total) * 100) if total > 0 else 0
-
-    due_maintenance = sum(
-        1 for m in machines 
-        if m.next_maintenance_date and m.next_maintenance_date <= warning_date
-    )
-
+    avg_health = 0
+    if machines:
+        avg_health = round(sum(m.health_score or 0 for m in machines) / len(machines))
+    
+    # Simple resolution rate
+    res_rate = 0
+    if total > 0:
+        res_rate = round((done / total) * 100)
+    
+    due_maint = sum(1 for m in machines if m.next_maintenance_date and m.next_maintenance_date <= warning_date)
+    
     return {
         "totalOT": total,
         "openOT": open_ot,
@@ -185,8 +226,8 @@ def get_manager_stats(db: Session = Depends(get_db)):
         "criticalOT": critical,
         "lowStock": low_stock,
         "avgMachineHealth": avg_health,
-        "resolutionRate": resolution_rate,
-        "dueMaintenance": due_maintenance,
+        "resolutionRate": res_rate,
+        "dueMaintenance": due_maint
     }
 
 @router.get("/kpi-reliability")
@@ -410,6 +451,103 @@ def get_machine_work_orders(machine_id: int, db: Session = Depends(get_db)):
     orders = db.query(WorkOrder).filter(WorkOrder.equipment_id == machine.reference).order_by(WorkOrder.id.desc()).all()
     return orders
 
+# ── TIME TRACKING (WORK SESSIONS) ──
+
+@router.get("/technician/timer/active", response_model=Optional[WorkSessionSchema])
+def get_active_session(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    session = db.query(WorkSession).filter(
+        WorkSession.technician_id == current_user.id,
+        WorkSession.end_time == None
+    ).first()
+    
+    if session:
+        # Populate the title for the frontend UI
+        session.work_order_title = session.work_order.title if session.work_order else "Intervention"
+        
+    return session
+
+@router.post("/work-orders/{wo_id}/timer/start", response_model=WorkSessionSchema)
+def start_work_session(
+    wo_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    # Rule 4.3: One active session only
+    active_session = db.query(WorkSession).filter(
+        WorkSession.technician_id == current_user.id,
+        WorkSession.end_time == None
+    ).first()
+    
+    if active_session:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Session déjà active sur l'OT #{active_session.work_order_id}. Arrêtez-la d'abord."
+        )
+
+    order = db.query(WorkOrder).filter(WorkOrder.id == wo_id).first()
+    if not order:
+        raise HTTPException(status_code=404, detail="OT introuvable")
+
+    now = datetime.utcnow()
+    session = WorkSession(
+        work_order_id=wo_id,
+        technician_id=current_user.id,
+        start_time=now.isoformat(),
+        is_synced=True
+    )
+    db.add(session)
+    
+    # Rule 4.7: Update OT status
+    if order.status == "open":
+        order.status = "in_progress"
+    
+    if not order.actual_start_date:
+        order.actual_start_date = now.strftime("%Y-%m-%d")
+
+    db.commit()
+    db.refresh(session)
+    
+    # Populate for initial response
+    session.work_order_title = order.title
+    
+    return session
+
+@router.post("/work-orders/{wo_id}/timer/stop", response_model=WorkSessionSchema)
+def stop_work_session(
+    wo_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    session = db.query(WorkSession).filter(
+        WorkSession.work_order_id == wo_id,
+        WorkSession.technician_id == current_user.id,
+        WorkSession.end_time == None
+    ).first()
+
+    if not session:
+        raise HTTPException(status_code=400, detail="Aucune session active sur cet OT.")
+
+    now = datetime.utcnow()
+    start_dt = datetime.fromisoformat(session.start_time)
+    
+    diff = now - start_dt
+    duration_hours = round(diff.total_seconds() / 3600, 4) # High precision for small tasks
+    
+    session.end_time = now.isoformat()
+    session.duration = duration_hours
+    
+    order = db.query(WorkOrder).filter(WorkOrder.id == wo_id).first()
+    if order:
+        order.time_spent = (order.time_spent or 0.0) + duration_hours
+
+    db.commit()
+    db.refresh(session)
+    return session
+
+
 @router.patch("/work-orders/{wo_id}", response_model=WorkOrderSchema)
 def update_work_order(
     wo_id: int, 
@@ -421,7 +559,17 @@ def update_work_order(
     if not order:
         raise HTTPException(status_code=404, detail="Ordre de travail introuvable")
 
+    # ── Permission Check ───────────────────────────────────────────────────
+    # If the user is a technician, they can only edit their own creations
+    if current_user.role == "technician" and order.created_by != current_user.id:
+        raise HTTPException(
+            status_code=403, 
+            detail="Accès refusé : Vous ne pouvez modifier que les OT que vous avez créés."
+        )
+    # ───────────────────────────────────────────────────────────────────────
+
     prev_status = order.status
+
 
     if "status" in update_data:
         order.status = update_data["status"].lower()
@@ -485,6 +633,81 @@ def update_work_order(
     # Attach stock_updates as a transient attribute for the response
     order.__dict__["_stock_updates"] = stock_updates
     return order
+
+@router.delete("/work-orders/{wo_id}")
+def delete_work_order(
+    wo_id: int, 
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    order = db.query(WorkOrder).filter(WorkOrder.id == wo_id).first()
+    if not order:
+        raise HTTPException(status_code=404, detail="Ordre de travail introuvable")
+
+    # If Manager/Admin: HARD DELETE immediately
+    if current_user.role in ["manager", "admin"]:
+        # Delete related items first to avoid integrity errors in simple setups
+        db.query(WorkOrderPart).filter(WorkOrderPart.work_order_id == wo_id).delete()
+        db.query(WorkOrderStep).filter(WorkOrderStep.work_order_id == wo_id).delete()
+        db.query(WorkSession).filter(WorkSession.work_order_id == wo_id).delete()
+        db.query(PartsRequest).filter(PartsRequest.work_order_id == wo_id).delete()
+        
+        db.delete(order)
+        db.commit()
+        return {"message": "Ordre de travail supprimé définitivement par le responsable."}
+
+    # If Technician: MUST BE OWNER + SOFT DELETE (Pending Deletion)
+    if current_user.role == "technician":
+        if order.created_by != current_user.id:
+            raise HTTPException(status_code=403, detail="Vous ne pouvez supprimer que vos propres OT.")
+        
+        # Change status to pending_deletion instead of deleting
+        order.status = "pending_deletion"
+        db.commit()
+        return {"message": "Demande de suppression envoyée pour approbation au responsable.", "status": "pending_deletion"}
+
+    raise HTTPException(status_code=403, detail="Action non autorisée.")
+
+@router.post("/work-orders/{wo_id}/approve-deletion")
+def approve_deletion(
+    wo_id: int, 
+    db: Session = Depends(get_db),
+    current_user: User = Depends(role_required(["manager", "admin"]))
+):
+    order = db.query(WorkOrder).filter(WorkOrder.id == wo_id).first()
+    if not order:
+        raise HTTPException(status_code=404, detail="Ordre de travail introuvable")
+    
+    if order.status != "pending_deletion":
+        raise HTTPException(status_code=400, detail="Cet OT n'est pas en attente de suppression.")
+
+    # Hard delete
+    db.query(WorkOrderPart).filter(WorkOrderPart.work_order_id == wo_id).delete()
+    db.query(WorkOrderStep).filter(WorkOrderStep.work_order_id == wo_id).delete()
+    db.query(WorkSession).filter(WorkSession.work_order_id == wo_id).delete()
+    db.query(PartsRequest).filter(PartsRequest.work_order_id == wo_id).delete()
+    db.delete(order)
+    db.commit()
+    return {"message": "Suppression approuvée et exécutée."}
+
+@router.post("/work-orders/{wo_id}/reject-deletion")
+def reject_deletion(
+    wo_id: int, 
+    db: Session = Depends(get_db),
+    current_user: User = Depends(role_required(["manager", "admin"]))
+):
+    order = db.query(WorkOrder).filter(WorkOrder.id == wo_id).first()
+    if not order:
+        raise HTTPException(status_code=404, detail="Ordre de travail introuvable")
+
+    if order.status != "pending_deletion":
+        raise HTTPException(status_code=400, detail="Cet OT n'est pas en attente de suppression.")
+
+    # Restore to open (or previous status if we had it, but open is safe default)
+    order.status = "open"
+    db.commit()
+    return {"message": "Demande de suppression rejetée. L'OT est à nouveau ouvert.", "status": "open"}
+
 
 @router.post("/work-orders/{wo_id}/parts")
 def add_work_order_part(
@@ -839,16 +1062,29 @@ def approve_parts_request(
         stock.quantity -= qty
         item.quantity_approved = qty
 
-        # Add part to the work order
-        wo_part = WorkOrderPart(
-            work_order_id=pr.work_order_id,
-            part_code=stock.reference,
-            part_name=stock.name,
-            quantity=qty,
-            unit_price_at_consumption=stock.unit_price,
-            deducted=True,
-        )
-        db.add(wo_part)
+        # Check if this part was already added to the WO (e.g. by technician) but not yet deducted
+        existing_wo_part = db.query(WorkOrderPart).filter(
+            WorkOrderPart.work_order_id == pr.work_order_id,
+            WorkOrderPart.part_code == stock.reference,
+            WorkOrderPart.deducted == False
+        ).first()
+
+        if existing_wo_part:
+            existing_wo_part.deducted = True
+            # In case the approved quantity changed (rare in this logic but good practice)
+            existing_wo_part.quantity = qty 
+            existing_wo_part.unit_price_at_consumption = stock.unit_price
+        else:
+            # Add part to the work order as new
+            wo_part = WorkOrderPart(
+                work_order_id=pr.work_order_id,
+                part_code=stock.reference,
+                part_name=stock.name,
+                quantity=qty,
+                unit_price_at_consumption=stock.unit_price,
+                deducted=True,
+            )
+            db.add(wo_part)
         deducted_parts.append({"part": stock.name, "qty": qty, "remaining": stock.quantity})
         logging.info(f"Magasinier approved: {qty}x {stock.name} for OT #{pr.work_order_id}")
 

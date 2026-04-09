@@ -1,8 +1,8 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { 
-    Users, User, CheckCircle, Clock, AlertTriangle, 
+import {
+    Users, User, CheckCircle, Clock, AlertTriangle,
     TrendingUp, ClipboardList, ChevronRight, Search,
     Filter, ArrowRight, Activity, X, Layers, Zap,
     ChevronDown, UserCheck
@@ -35,7 +35,7 @@ export default function TeamSupervisionPage() {
     const [workOrders, setWorkOrders] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
     const [loadingDetails, setLoadingDetails] = useState(false);
-    
+
     // Comparison State
     const [isComparing, setIsComparing] = useState(false);
 
@@ -104,21 +104,19 @@ export default function TeamSupervisionPage() {
                         Performance & Suivi (Vue d&apos;ensemble)
                     </p>
                 </div>
-                
+
                 {/* ── Custom Dropdown Selector ── */}
                 <div className="relative w-full sm:w-80 z-[100]">
-                    <button 
+                    <button
                         onClick={() => setIsDropdownOpen(!isDropdownOpen)}
-                        className={`w-full flex items-center justify-between px-6 py-4 rounded-3xl border transition-all duration-500 group ${
-                            selectedTechId 
-                                ? 'bg-violet-600/30 border-violet-500/50 text-white shadow-2xl shadow-violet-500/20' 
+                        className={`w-full flex items-center justify-between px-6 py-4 rounded-3xl border transition-all duration-500 group ${selectedTechId
+                                ? 'bg-violet-600/30 border-violet-500/50 text-white shadow-2xl shadow-violet-500/20'
                                 : 'bg-slate-900 border-white/5 text-slate-400 hover:border-white/20'
-                        }`}
+                            }`}
                     >
                         <div className="flex items-center gap-3">
-                            <div className={`size-10 rounded-2xl flex items-center justify-center font-black text-xs transition-colors ${
-                                selectedTechId ? 'bg-violet-500 text-white' : 'bg-slate-800 text-slate-600'
-                            }`}>
+                            <div className={`size-10 rounded-2xl flex items-center justify-center font-black text-xs transition-colors ${selectedTechId ? 'bg-violet-500 text-white' : 'bg-slate-800 text-slate-600'
+                                }`}>
                                 {selectedTech ? selectedTech.name?.charAt(0) : <Users size={18} />}
                             </div>
                             <div className="text-left">
@@ -143,13 +141,11 @@ export default function TeamSupervisionPage() {
                                             setSelectedTechId(tech.id);
                                             setIsDropdownOpen(false);
                                         }}
-                                        className={`w-full flex items-center gap-4 px-5 py-4 text-left transition-all rounded-2xl hover:bg-white/5 group/item ${
-                                            selectedTechId === tech.id ? 'bg-violet-500/20 text-violet-400 border border-violet-500/20' : 'text-slate-400 border border-transparent'
-                                        }`}
+                                        className={`w-full flex items-center gap-4 px-5 py-4 text-left transition-all rounded-2xl hover:bg-white/5 group/item ${selectedTechId === tech.id ? 'bg-violet-500/20 text-violet-400 border border-violet-500/20' : 'text-slate-400 border border-transparent'
+                                            }`}
                                     >
-                                        <div className={`size-10 rounded-xl flex items-center justify-center font-black text-xs transition-all ${
-                                            selectedTechId === tech.id ? 'bg-violet-500 text-white' : 'bg-slate-800 text-slate-600 group-hover/item:bg-slate-700'
-                                        }`}>
+                                        <div className={`size-10 rounded-xl flex items-center justify-center font-black text-xs transition-all ${selectedTechId === tech.id ? 'bg-violet-500 text-white' : 'bg-slate-800 text-slate-600 group-hover/item:bg-slate-700'
+                                            }`}>
                                             {tech.name?.charAt(0)}
                                         </div>
                                         <div className="flex-1">
@@ -173,34 +169,34 @@ export default function TeamSupervisionPage() {
                 <div className="space-y-8 animate-in fade-in slide-in-from-left-4 duration-500">
                     {/* ── KPI Row ── */}
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                        <KPICard 
-                            label="Taux de Réussite" 
-                            value={`${stats.completionRate}%`} 
-                            sub={`${stats.doneOT} / ${stats.totalAssigned} terminés`} 
-                            icon={CheckCircle} 
-                            color="emerald" 
+                        <KPICard
+                            label="Taux de Réussite"
+                            value={`${stats.completionRate}%`}
+                            sub={`${stats.doneOT} / ${stats.totalAssigned} terminés`}
+                            icon={CheckCircle}
+                            color="emerald"
                         />
-                        <KPICard 
-                            label="OT en Retard" 
-                            value={stats.overdueOT} 
-                            sub="Action requise immédiate" 
-                            icon={AlertTriangle} 
-                            color="rose" 
+                        <KPICard
+                            label="OT en Retard"
+                            value={stats.overdueOT}
+                            sub="Action requise immédiate"
+                            icon={AlertTriangle}
+                            color="rose"
                             alert={stats.overdueOT > 0}
                         />
-                        <KPICard 
-                            label="Tps Moyen Réparation" 
-                            value={`${stats.avgRepairTime}h`} 
-                            sub="Basé sur les OT clos" 
-                            icon={Clock} 
-                            color="blue" 
+                        <KPICard
+                            label="Tps Moyen Réparation"
+                            value={`${stats.avgRepairTime}h`}
+                            sub="Basé sur les OT clos"
+                            icon={Clock}
+                            color="blue"
                         />
-                        <KPICard 
-                            label="Charge Actuelle" 
-                            value={stats.openOT + stats.inProgressOT} 
-                            sub={`${stats.inProgressOT} en cours d'exécution`} 
-                            icon={Activity} 
-                            color="violet" 
+                        <KPICard
+                            label="Charge Actuelle"
+                            value={stats.openOT + stats.inProgressOT}
+                            sub={`${stats.inProgressOT} en cours d'exécution`}
+                            icon={Activity}
+                            color="violet"
                         />
                     </div>
 
@@ -217,7 +213,7 @@ export default function TeamSupervisionPage() {
                                     {workOrders.length} ordres
                                 </div>
                             </div>
-                            
+
                             <div className="azure-card overflow-hidden">
                                 <table className="w-full text-left">
                                     <thead>
@@ -233,10 +229,9 @@ export default function TeamSupervisionPage() {
                                                 <td className="px-6 py-4 text-xs font-black text-blue-400 font-mono tracking-tighter">{wo.sap_order_id}</td>
                                                 <td className="px-6 py-4 text-sm font-bold text-slate-200">{wo.title}</td>
                                                 <td className="px-6 py-4 text-right">
-                                                    <span className={`text-[0.6rem] font-black px-2 py-1 rounded-md uppercase tracking-tight ${
-                                                        wo.status === 'done' ? 'bg-emerald-500/10 text-emerald-500' :
-                                                        wo.status === 'in_progress' ? 'bg-amber-500/10 text-amber-500' : 'bg-slate-500/10 text-slate-400'
-                                                    }`}>
+                                                    <span className={`text-[0.6rem] font-black px-2 py-1 rounded-md uppercase tracking-tight ${wo.status === 'done' ? 'bg-emerald-500/10 text-emerald-500' :
+                                                            wo.status === 'in_progress' ? 'bg-amber-500/10 text-amber-500' : 'bg-slate-500/10 text-slate-400'
+                                                        }`}>
                                                         {wo.status}
                                                     </span>
                                                 </td>
@@ -258,7 +253,7 @@ export default function TeamSupervisionPage() {
                                     <p className="text-xs font-bold text-slate-500 uppercase mt-1 tracking-widest">{selectedTech.email}</p>
                                 </div>
                                 <div className="mt-8 space-y-3">
-                                    <button 
+                                    <button
                                         onClick={() => setIsComparing(true)}
                                         className="w-full py-4 bg-violet-600 hover:bg-violet-500 text-white text-xs font-black uppercase tracking-[0.2em] rounded-xl shadow-lg shadow-violet-600/20 transition-all flex items-center justify-center gap-2 group"
                                     >
@@ -282,7 +277,7 @@ export default function TeamSupervisionPage() {
 
             {/* ── Comparison Mode Overlay ── */}
             {isComparing && (
-                <ComparisonOverlay 
+                <ComparisonOverlay
                     technicians={technicians}
                     tech1={selectedTech!}
                     onClose={() => setIsComparing(false)}

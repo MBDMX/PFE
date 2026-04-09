@@ -12,8 +12,9 @@ from app.core.config import settings
 router = APIRouter()
 
 def make_token_data(user: User) -> dict:
-    """Single source of truth for JWT payload — always includes sub, role, name."""
+    """Single source of truth for JWT payload — always includes id, sub, role, name."""
     return {
+        "id":   user.id,
         "sub":  user.username,
         "role": user.role,
         "name": user.name,

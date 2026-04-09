@@ -75,9 +75,9 @@ class WorkOrder(BaseModel):
     sap_order_id: Optional[str] = None
     title: str
     description: Optional[str] = None
-    type: str
-    priority: str
-    status: str
+    type: Optional[str] = "corrective"
+    priority: Optional[str] = "medium"
+    status: Optional[str] = "open"
     technical_location: Optional[str] = None
     equipment_id: Optional[str] = None
     serial_number: Optional[str] = None
@@ -102,6 +102,40 @@ class WorkOrder(BaseModel):
     @computed_field
     def total_parts_cost(self) -> float:
         return round(sum(p.quantity * (getattr(p, 'unit_price_at_consumption', 0.0) or 0.0) for p in self.parts), 2) if self.parts else 0.0
+    
+    model_config = ConfigDict(from_attributes=True)
+
+class WorkOrderCreate(BaseModel):
+    title: str
+    description: Optional[str] = None
+    type: str = "corrective"
+    priority: str = "medium"
+    location: Optional[str] = None
+    equipmentId: Optional[str] = None
+    team: Optional[str] = None
+    technicianId: Optional[str] = None # Frontend sends as string from select
+    responsiblePerson: Optional[str] = None
+    startDate: Optional[str] = None
+    endDate: Optional[str] = None
+    createdAt: Optional[str] = None
+    parts: Optional[List[dict]] = []
+    steps: Optional[List[str]] = []
+
+
+class WorkSessionBase(BaseModel):
+    work_order_id: int
+    technician_id: int
+    start_time: str
+    end_time: Optional[str] = None
+    duration: Optional[float] = 0.0
+    is_synced: Optional[bool] = True
+
+class WorkSessionCreate(WorkSessionBase):
+    pass
+
+class WorkSession(WorkSessionBase):
+    id: int
+    work_order_title: Optional[str] = None
     
     model_config = ConfigDict(from_attributes=True)
 

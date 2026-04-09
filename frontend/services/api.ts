@@ -128,6 +128,7 @@ export const gmaoApi = {
         if (typeof window !== 'undefined' && !navigator.onLine) {
             await db.syncQueue.add({
                 type: 'UPDATE_WORK_ORDER',
+                id: Number(id),
                 endpoint: `/work-orders/${id}`,
                 method: 'PATCH',
                 payload: data,
@@ -139,6 +140,25 @@ export const gmaoApi = {
         const res = await api.patch(`/work-orders/${id}`, data);
         return res.data;
     },
+
+    deleteWorkOrder: async (id: number | string) => {
+        if (typeof window !== 'undefined' && !navigator.onLine) {
+            await db.syncQueue.add({
+                type: 'DELETE_WORK_ORDER',
+                endpoint: `/work-orders/${id}`,
+                method: 'DELETE',
+                payload: {},
+                timestamp: Date.now(),
+                status: 'pending'
+            });
+            return { offline: true };
+        }
+        const res = await api.delete(`/work-orders/${id}`);
+        return res.data;
+    },
+
+    approveWorkOrderDeletion: (id: number | string) => api.post(`/work-orders/${id}/approve-deletion`),
+    rejectWorkOrderDeletion: (id: number | string) => api.post(`/work-orders/${id}/reject-deletion`),
 
     getMachineWorkOrders: async (machineId: number) => {
         // Simple filter on local workOrders if offline
@@ -251,6 +271,31 @@ export const gmaoApi = {
         const res = await api.patch(`/parts-requests/${reqId}/reject`, { reason });
         return res.data;
     },
+    
+    // TIME TRACKING
+    getTimerActive: () => handleGet('/technician/timer/active'),
+    startTimer: (woId: number | string) => handlePost(`/work-orders/${woId}/timer/start`, {}, 'TIMER_START'),
+    stopTimer: (woId: number | string) => handlePost(`/work-orders/${woId}/timer/stop`, {}, 'TIMER_STOP'),
+
+    // SYSTEM ADMINISTRATION
+    resetSystem: () => handlePost('/system/reset', {}, 'RESET_SYSTEM'),
+
+    // AUTH HELPERS
+    getCurrentUser: () => {
+        if (typeof window === 'undefined') return null;
+        const user = localStorage.getItem('user');
+        if (user) return JSON.parse(user);
+        
+        // Fallback: decode JWT token
+        const token = localStorage.getItem('token');
+        if (!token) return null;
+        try {
+            const payload = JSON.parse(window.atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
+            return { id: payload.id, role: payload.role, name: payload.name };
+        } catch {
+            return null;
+        }
+    }
 };
 
 export default api;

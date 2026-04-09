@@ -24,7 +24,7 @@ export default function MagDashboard() {
     if (loading) return <div className="h-64 flex items-center justify-center text-slate-500 animate-pulse uppercase font-black text-xs tracking-widest text-center">Initialisation du Dashboard Magasin...</div>;
 
     const cards = [
-        { label: 'En attente', value: stats?.pending_requests || 1, icon: Clock, color: 'text-amber-400', bg: 'bg-amber-400/10' },
+        { label: 'En attente', value: stats?.pending_requests || 0, icon: Clock, color: 'text-amber-400', bg: 'bg-amber-400/10' },
         { label: 'Validées', value: stats?.approved_requests || 0, icon: CheckCircle, color: 'text-emerald-400', bg: 'bg-emerald-400/10' },
         { label: 'Refusées', value: stats?.rejected_requests || 0, icon: XCircle, color: 'text-rose-400', bg: 'bg-rose-400/10' },
         { label: 'Alertes Stock', value: stats?.critical_stock_alerts || 0, icon: AlertTriangle, color: 'text-orange-400', bg: 'bg-orange-400/10' },

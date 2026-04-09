@@ -47,9 +47,10 @@ export default function LoginPage() {
       const res = await api.post('/auth/login', { identifier: username, password });
       const { access_token, refresh_token } = res.data;
 
-      // Store tokens only — never store role in localStorage
+      // Store tokens and user info
       localStorage.setItem('token', access_token);
       if (refresh_token) localStorage.setItem('refresh_token', refresh_token);
+      localStorage.setItem('user', JSON.stringify(res.data.user));
 
       // Decode role from JWT (backend is the source of truth)
       const payload = JSON.parse(

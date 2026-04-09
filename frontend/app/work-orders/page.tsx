@@ -15,12 +15,13 @@ import {
   ArrowUpRight,
   Trash2,
   X,
-  ChevronRight
+  ChevronRight,
+  Loader2
 } from 'lucide-react';
 import { gmaoApi } from '@/services/api';
 
 type Priority = 'low' | 'medium' | 'high' | 'critical';
-type WOStatus = 'open' | 'in_progress' | 'done' | 'closed';
+type WOStatus = 'open' | 'in_progress' | 'done' | 'closed' | 'pending_deletion';
 type WorkOrder = { 
   id: number; 
   sap_order_id: string;
@@ -29,7 +30,8 @@ type WorkOrder = {
   technician_id: number | null; 
   priority: Priority; 
   status: WOStatus; 
-  planned_start_date: string 
+  planned_start_date: string;
+  created_by?: number;
 };
 
 export default function WorkOrdersPage() {
@@ -37,8 +39,11 @@ export default function WorkOrdersPage() {
     const [loading, setLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState('');
     const [statusFilter, setStatusFilter] = useState('all');
-    const [isModalOpen, setIsModalOpen] = useState(false);
+    const [isUpdating, setIsUpdating] = useState<number | null>(null);
     const router = useRouter();
+
+    const currentUser = gmaoApi.getCurrentUser();
+    const isManager = currentUser?.role === 'manager' || currentUser?.role === 'admin';
 
     const fetchOrders = async () => {
         setLoading(true);
@@ -56,19 +61,38 @@ export default function WorkOrdersPage() {
         fetchOrders();
     }, []);
 
+    const handleDelete = async (order: WorkOrder) => {
+        if (!confirm(isManager ? "Supprimer définitivement cet OT ?" : "Demander la suppression de votre OT ?")) return;
+        setIsUpdating(order.id);
+        try {
+            const res = await gmaoApi.deleteWorkOrder(order.id);
+            if (res.offline || res.status === 'pending_deletion') {
+                // Refresh to show pending status
+                fetchOrders();
+            } else {
+                setOrders(orders.filter(o => o.id !== order.id));
+            }
+        } catch (err) {
+            console.error("Delete failed", err);
+        } finally {
+            setIsUpdating(null);
+        }
+    };
+
     const filteredOrders = orders.filter(o => {
-        const matchesSearch = o.title.toLowerCase().includes(searchTerm.toLowerCase());
+        const matchesSearch = (o.title + o.sap_order_id).toLowerCase().includes(searchTerm.toLowerCase());
         const matchesStatus = statusFilter === 'all' || o.status === statusFilter;
         return matchesSearch && matchesStatus;
     });
 
     const getStatusStyle = (status: WOStatus) => {
         switch(status) {
-            case 'open':        return { label: 'Ouvert',    color: 'text-amber-400',   bg: 'bg-amber-400/10',   icon: Clock };
-            case 'in_progress': return { label: 'En cours',  color: 'text-blue-400',    bg: 'bg-blue-400/10',    icon: Activity };
-            case 'done':        return { label: 'Terminé',   color: 'text-emerald-400', bg: 'bg-emerald-400/10', icon: CheckCircle };
-            case 'closed':      return { label: 'Clôturé',   color: 'text-slate-500',   bg: 'bg-slate-500/10',   icon: X };
-            default:            return { label: 'Inconnu',   color: 'text-slate-400',   bg: 'bg-slate-400/10',   icon: AlertTriangle };
+            case 'open':             return { label: 'Ouvert',    color: 'text-amber-400',   bg: 'bg-amber-400/10',   icon: Clock };
+            case 'in_progress':      return { label: 'En cours',  color: 'text-blue-400',    bg: 'bg-blue-400/10',    icon: Activity };
+            case 'pending_deletion': return { label: 'Attente Suppr.', color: 'text-rose-500', bg: 'bg-rose-500/10', icon: AlertTriangle };
+            case 'done':             return { label: 'Terminé',   color: 'text-emerald-400', bg: 'bg-emerald-400/10', icon: CheckCircle };
+            case 'closed':           return { label: 'Clôturé',   color: 'text-slate-500',   bg: 'bg-slate-500/10',   icon: X };
+            default:                 return { label: 'Inconnu',   color: 'text-slate-400',   bg: 'bg-slate-400/10',   icon: AlertTriangle };
         }
     };
 
@@ -134,6 +158,7 @@ export default function WorkOrdersPage() {
                         <option value="all">Tous les Statuts</option>
                         <option value="open">Ouvert</option>
                         <option value="in_progress">En Cours</option>
+                        <option value="pending_deletion">Attente Suppr.</option>
                         <option value="done">Terminé</option>
                         <option value="closed">Clôturé</option>
                     </select>
@@ -208,9 +233,16 @@ export default function WorkOrdersPage() {
                                                 >
                                                     <ArrowUpRight size={14} />
                                                 </button>
-                                                <button className="size-9 rounded-lg bg-white/5 hover:bg-rose-600/20 text-slate-400 hover:text-rose-400 flex items-center justify-center transition-all">
-                                                    <Trash2 size={14} />
-                                                </button>
+                                                {(isManager || Number(o.created_by) === Number(currentUser?.id)) && (
+                                                    <button 
+                                                        onClick={() => handleDelete(o)}
+                                                        disabled={isUpdating === o.id}
+                                                        title="Supprimer / Demander suppression"
+                                                        className="size-9 rounded-lg bg-white/5 hover:bg-rose-600/20 text-slate-400 hover:text-rose-400 flex items-center justify-center transition-all"
+                                                    >
+                                                        {isUpdating === o.id ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
+                                                    </button>
+                                                )}
                                             </div>
                                         </td>
                                     </tr>

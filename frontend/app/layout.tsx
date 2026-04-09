@@ -6,9 +6,10 @@ import { usePathname, useRouter } from 'next/navigation';
 import {
   LayoutDashboard, Wrench, ClipboardList,
   Package, LogOut, ShieldCheck, Settings, ChevronRight, Users, Warehouse,
-  RefreshCw
+  RefreshCw, Clock, Square
 } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
+import { gmaoApi } from '../services/api';
 import { ToastProvider, useToast } from '../components/ui/toast';
 import { db } from '../lib/db';
 import { useLiveQuery } from 'dexie-react-hooks';
@@ -49,6 +50,102 @@ const ROLE_ROUTES: Record<string, string> = {
   manager: '/dashboard/manager',
   magasinier: '/dashboard/magasinier',
 };
+
+// ────────────────────────────────────────────
+// Components
+// ────────────────────────────────────────────
+function GlobalTimerBar() {
+  const [activeSession, setActiveSession] = useState<any>(null);
+  const [elapsed, setElapsed] = useState(0);
+  const intervalRef = useRef<any>(null);
+  const pathname = usePathname();
+  const { success, error } = useToast();
+
+  const fetchSession = async () => {
+    try {
+      const session = await gmaoApi.getTimerActive();
+      setActiveSession(session);
+      if (session) {
+        startTimer(session.start_time);
+      } else {
+        stopTimer();
+      }
+    } catch (err) {
+      console.error("Global timer check failed", err);
+    }
+  };
+
+  const startTimer = (startTimeStr: string) => {
+    if (intervalRef.current) clearInterval(intervalRef.current);
+    const start = new Date(startTimeStr).getTime();
+    intervalRef.current = setInterval(() => {
+      setElapsed(Math.floor((new Date().getTime() - start) / 1000));
+    }, 1000);
+  };
+
+  const stopTimer = () => {
+    if (intervalRef.current) clearInterval(intervalRef.current);
+    intervalRef.current = null;
+    setElapsed(0);
+  };
+
+  useEffect(() => {
+    fetchSession();
+    return () => stopTimer();
+  }, [pathname]);
+
+  const handleStop = async () => {
+    if (!activeSession) return;
+    try {
+      await gmaoApi.stopTimer(String(activeSession.work_order_id));
+      stopTimer();
+      setActiveSession(null);
+      success("Session terminée !");
+      window.location.reload(); 
+    } catch (err) {
+      error("Erreur lors de l'arrêt");
+    }
+  };
+
+  if (!activeSession) return null;
+
+  const formatTime = (s: number) => {
+    const h = Math.floor(s / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    const sec = s % 60;
+    return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${sec.toString().padStart(2, '0')}`;
+  };
+
+  return (
+    <div className="fixed bottom-0 left-0 right-0 z-[100] bg-blue-600/90 backdrop-blur-md border-t border-blue-400/30 px-6 py-3 flex items-center justify-between shadow-[0_-10px_40px_rgba(37,99,235,0.4)] animate-in slide-in-from-bottom-full duration-500 rounded-t-2xl mx-4 sm:mx-8 mb-4">
+      <div className="flex items-center gap-4">
+        <div className="size-10 rounded-full bg-white/20 flex items-center justify-center text-white animate-pulse">
+          <Clock size={20} />
+        </div>
+        <div>
+          <div className="text-[0.6rem] font-black text-blue-100 uppercase tracking-[0.2em] mb-0.5 opacity-80">Intervention en cours</div>
+          <div className="text-sm font-black text-white flex items-center gap-2">
+            OT #{activeSession.work_order_id} 
+            <span className="size-1.5 rounded-full bg-blue-300" />
+            {activeSession.title || 'Mission Technique'}
+          </div>
+        </div>
+      </div>
+
+      <div className="flex items-center gap-6 sm:gap-12">
+        <div className="text-xl sm:text-3xl font-black text-white tabular-nums tracking-tighter">
+          {formatTime(elapsed)}
+        </div>
+        <button 
+          onClick={handleStop}
+          className="bg-white text-blue-600 px-4 sm:px-6 py-2 rounded-xl font-black text-[0.65rem] sm:text-xs uppercase tracking-widest hover:bg-blue-50 transition-all shadow-lg active:scale-95 flex items-center gap-2 whitespace-nowrap"
+        >
+          <Square size={14} fill="currentColor" /> <span className="hidden sm:inline">Arrêter le compteur</span><span className="sm:hidden">Stop</span>
+        </button>
+      </div>
+    </div>
+  );
+}
 
 // ────────────────────────────────────────────
 // Client Content Wrapper (Uses Contexts)
@@ -261,6 +358,9 @@ function ClientAppWrapper({ children }: { children: React.ReactNode }) {
       <main className="main-content">
         {children}
       </main>
+      
+      {/* GLOBAL PERSISTENT TIMER */}
+      {user?.role === 'technician' && <GlobalTimerBar />}
     </div>
   );
 }

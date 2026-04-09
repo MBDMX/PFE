@@ -53,7 +53,7 @@ export default function NewWorkOrder() {
   const [machines, setMachines] = useState<any[]>([]);
   const [allTechnicians, setAllTechnicians] = useState<any[]>([]);
   const [stock, setStock] = useState<any[]>([]);
-  const { success } = useToast();
+  const { success, error: toastError } = useToast();
   
   // Local Form State
   const [formData, setFormData] = useState({
@@ -160,7 +160,9 @@ export default function NewWorkOrder() {
         success('Ordre de Travail créé', `${res.sap_order_id || 'SAP Confirmation'} enregistré.`);
       }
       router.push('/work-orders');
-    } catch (err) {
+    } catch (err: any) {
+      const msg = err.response?.data?.detail || "Erreur lors de la création de l'OT";
+      toastError('Erreur SAP', Array.isArray(msg) ? msg.join(', ') : msg);
       setLoading(false);
     }
   };
@@ -231,6 +233,43 @@ export default function NewWorkOrder() {
                   value={formData.location}
                   onChange={(e) => setFormData({...formData, location: e.target.value})}
                 />
+              </div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+            <div className="space-y-4">
+              <label className="text-[0.75rem] font-black text-slate-500 uppercase tracking-[0.25em] ml-1">Type d'intervention</label>
+              <div className="relative group">
+                <Settings className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-500 group-focus-within:text-blue-400 transition-colors" size={20} />
+                <select 
+                  required
+                  className="w-full bg-slate-950/50 border border-white/10 rounded-2xl py-5 pl-14 pr-6 text-white focus:outline-none focus:border-blue-500/50 transition-all font-bold text-lg appearance-none cursor-pointer"
+                  value={formData.type}
+                  onChange={(e) => setFormData({...formData, type: e.target.value})}
+                >
+                  <option value="corrective">🚧 Corrective (Curatif)</option>
+                  <option value="preventive">📅 Préventive</option>
+                  <option value="amélioration">✨ Amélioration</option>
+                </select>
+              </div>
+            </div>
+
+            <div className="space-y-4">
+              <label className="text-[0.75rem] font-black text-slate-500 uppercase tracking-[0.25em] ml-1">Niveau de Priorité</label>
+              <div className="relative group">
+                <AlertCircle className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-500 group-focus-within:text-rose-400 transition-colors" size={20} />
+                <select 
+                  required
+                  className="w-full bg-slate-950/50 border border-white/10 rounded-2xl py-5 pl-14 pr-6 text-white focus:outline-none focus:border-rose-500/50 transition-all font-bold text-lg appearance-none cursor-pointer"
+                  value={formData.priority}
+                  onChange={(e) => setFormData({...formData, priority: e.target.value})}
+                >
+                  <option value="low">🟢 Basse (Routine)</option>
+                  <option value="medium">🟡 Moyenne (Standard)</option>
+                  <option value="high">🟠 Haute (Urgent)</option>
+                  <option value="critical">🔴 Critique (Blocage Prod)</option>
+                </select>
               </div>
             </div>
           </div>

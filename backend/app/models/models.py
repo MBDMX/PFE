@@ -128,3 +128,16 @@ class StockMovement(Base):
     
     user = relationship("User")
 
+class WorkSession(Base):
+    __tablename__ = "work_sessions"
+    id = Column(Integer, primary_key=True, index=True)
+    work_order_id = Column(Integer, ForeignKey("work_orders.id"))
+    technician_id = Column(Integer, ForeignKey("users.id"))
+    start_time = Column(String) # ISO 8601
+    end_time = Column(String, nullable=True)
+    duration = Column(Float, default=0.0) # Duration in hours or minutes
+    is_synced = Column(Boolean, default=True)
+    
+    work_order = relationship("WorkOrder")
+    technician = relationship("User")
+
