@@ -2,8 +2,8 @@ import axios from 'axios';
 import { db } from '../lib/db';
 
 const apiBaseUrl = typeof window !== 'undefined'
-    ? `http://${window.location.hostname}:4000/api`
-    : 'http://localhost:4000/api';
+    ? `http://${window.location.hostname}:5000/api`
+    : 'http://localhost:5000/api';
 
 const api = axios.create({ baseURL: process.env.NEXT_PUBLIC_API_URL || apiBaseUrl });
 
@@ -57,14 +57,9 @@ async function handleGet(endpoint: string, table?: any) {
         // Background update of IndexedDB if table is provided
         if (table && Array.isArray(res.data) && typeof window !== 'undefined') {
             try {
-                await table.clear();
-                await table.bulkAdd(res.data);
+                await table.bulkPut(res.data);
             } catch (dbErr) {
                 console.warn(`Dexie Bulk Sync Error on ${endpoint}:`, dbErr);
-                // If bulk fails, try put individually to recover
-                for (const item of res.data) {
-                    await table.put(item).catch(() => {});
-                }
             }
         }
         return res.data;
@@ -94,6 +89,72 @@ async function handlePost(endpoint: string, data: any, actionType: any) {
     }
     const res = await api.post(endpoint, data);
     return res.data;
+}
+
+// ────────────────────────────────────────────
+// Synchronization Logic
+// ────────────────────────────────────────────
+
+async function processSyncQueue() {
+    if (typeof window === 'undefined' || !navigator.onLine) return;
+    
+    const queue = await db.syncQueue.where('status').equals('pending').toArray();
+    if (queue.length === 0) return;
+
+    for (const action of queue) {
+        try {
+            await db.syncQueue.update(action.id!, { status: 'syncing' });
+            
+            let res;
+            if (action.method === 'POST') res = await api.post(action.endpoint, action.payload);
+            else if (action.method === 'PATCH') res = await api.patch(action.endpoint, action.payload);
+            else if (action.method === 'DELETE') res = await api.delete(action.endpoint);
+            
+            await db.syncQueue.delete(action.id!);
+            console.log(`Sync Success: ${action.type} -> ${action.endpoint}`);
+        } catch (err: any) {
+            console.error(`Sync Failure for ${action.id}:`, err);
+            await db.syncQueue.update(action.id!, { 
+                status: 'error', 
+                errorMessage: err.response?.data?.detail || err.message 
+            });
+        }
+    }
+}
+
+// Auto-sync when coming back online
+if (typeof window !== 'undefined') {
+    window.addEventListener('online', () => {
+        processSyncQueue();
+        syncMasterData();
+    });
+}
+
+async function syncMasterData() {
+    if (typeof window === 'undefined' || !navigator.onLine) return;
+    
+    console.log('🔄 Syncing master data...');
+    try {
+        // Fetch everything in parallel
+        const [machines, stock, technicians, workOrders] = await Promise.all([
+            api.get('/machines'),
+            api.get('/stock'),
+            api.get('/technicians'),
+            api.get('/work-orders')
+        ]);
+
+        // Update Dexie tables
+        await Promise.all([
+            db.machines.bulkPut(machines.data),
+            db.stock.bulkPut(stock.data),
+            db.technicians.bulkPut(technicians.data),
+            db.workOrders.bulkPut(workOrders.data)
+        ]);
+        
+        console.log('✅ Master data synced successfully.');
+    } catch (err) {
+        console.error('❌ Master data sync failed:', err);
+    }
 }
 
 // ────────────────────────────────────────────
@@ -180,6 +241,10 @@ export const gmaoApi = {
 
     getReliabilityKpis: () => handleGet('/kpi-reliability'),
     getTechnicians: () => handleGet('/technicians', db.technicians),
+    syncData: async () => {
+        await processSyncQueue();
+        await syncMasterData();
+    },
 
     toggleStep: async (stepId: number, isDone: boolean) => {
         if (typeof window !== 'undefined' && !navigator.onLine) {

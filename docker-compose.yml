@@ -1,18 +1,32 @@
 version: '3.8'
 
 services:
+  postgres:
+    image: postgres:16
+    container_name: gmao_postgres
+    environment:
+      POSTGRES_USER: gmao_user
+      POSTGRES_PASSWORD: gmao_password
+      POSTGRES_DB: gmao_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+
   backend:
     build:
       context: ./backend
       dockerfile: Dockerfile
     container_name: gmao_backend
     ports:
-      - "4000:4000"
-    volumes:
-      # Mount the database file so it persists and doesn't reset when container restarts
-      - ./backend/gmao-pro.db:/app/gmao-pro.db
+      - "5000:5000"
     environment:
       - PYTHONUNBUFFERED=1
+      - DATABASE_URL=postgresql://gmao_user:gmao_password@postgres:5432/gmao_db
+      - SECRET_KEY=MaCleSecreteSuperLonguePourGMAO2026
+    depends_on:
+      - postgres
     restart: unless-stopped
 
   frontend:
@@ -23,7 +37,10 @@ services:
     ports:
       - "3000:3000"
     environment:
-      - NEXT_PUBLIC_API_URL=http://localhost:4000/api
+      - NEXT_PUBLIC_API_URL=http://localhost:5000/api
     depends_on:
       - backend
     restart: unless-stopped
+
+volumes:
+  postgres_data:

@@ -1,21 +1,17 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.api import auth, gmao
-from app.db.session import engine, Base, SessionLocal
-from app.models.models import User, Machine, Stock, WorkOrder, WorkOrderStep, WorkOrderPart, PartsRequest, PartsRequestItem, StockMovement
-from app.core.security import get_password_hash
+from app.api import auth, machines, work_orders, stock, stats, system, users, magasinier
+from app.db.session import prisma
 
-# Initialize Database
-Base.metadata.create_all(bind=engine)
+app = FastAPI(title="GMAO API", version="2.0.1")
 
-app = FastAPI(title="GMAO PRO API", version="1.1.0")
-
-# Setup CORS
+# ... middleware setup ...
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "http://localhost:3000",
         "http://127.0.0.1:3000",
+        "http://localhost:5000",
     ],
     allow_credentials=True,
     allow_methods=["*"],
@@ -23,16 +19,24 @@ app.add_middleware(
 )
 
 @app.on_event("startup")
-def seed_data():
-    from app.db.seed import execute_seed_data
-    db = SessionLocal()
-    execute_seed_data(db)
-    db.close()
+async def startup():
+    await prisma.connect()
 
-# Include Routers
+@app.on_event("shutdown")
+async def shutdown():
+    await prisma.disconnect()
+
+# Include Modular Routers
 app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
-app.include_router(gmao.router, prefix="/api", tags=["gmao"])
+app.include_router(system.router, prefix="/api") 
+app.include_router(machines.router, prefix="/api")
+app.include_router(work_orders.router, prefix="/api")
+app.include_router(stock.router, prefix="/api")
+app.include_router(stock.pr_router, prefix="/api")
+app.include_router(stats.router, prefix="/api")
+app.include_router(users.router, prefix="/api")
+app.include_router(magasinier.router, prefix="/api")
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=4000)
+    uvicorn.run(app, host="0.0.0.0", port=5000)

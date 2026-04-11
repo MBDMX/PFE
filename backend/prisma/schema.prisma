@@ -1,0 +1,160 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-py"
+}
+
+model User {
+  id              Int            @id @default(autoincrement())
+  username        String         @unique
+  email           String         @unique
+  password_hash   String
+  role            String
+  name            String?
+  manager_id      Int?
+  team            String?
+  
+  parts_requested PartsRequest[] @relation("Requester")
+  parts_approved  PartsRequest[] @relation("Approver")
+  stock_movements StockMovement[]
+  work_sessions   WorkSession[]
+}
+
+model Machine {
+  id                         Int      @id @default(autoincrement())
+  name                       String?
+  reference                  String?
+  location                   String?
+  status                     String?
+  health_score               Int?
+  last_maintenance_date      String?
+  next_maintenance_date      String?
+  maintenance_frequency_days Int      @default(90)
+}
+
+model WorkOrder {
+  id                 Int             @id @default(autoincrement())
+  sap_order_id       String?
+  title              String?
+  description        String?
+  type               String?
+  priority           String?
+  status             String?
+  technical_location String?
+  equipment_id       String?
+  serial_number      String?
+  team               String?
+  responsible_person String?
+  technician_id      Int?
+  planned_start_date String?
+  planned_end_date   String?
+  actual_start_date  String?
+  actual_end_date    String?
+  time_spent         Float?
+  work_log           String?
+  failure_cause      String?
+  solution_applied   String?
+  comments           String?
+  created_by         Int?
+  created_at         String?
+  
+  parts              WorkOrderPart[]
+  steps              WorkOrderStep[]
+  parts_requests     PartsRequest[]
+  stock_movements    StockMovement[]
+  work_sessions      WorkSession[]
+}
+
+model WorkOrderStep {
+  id            Int       @id @default(autoincrement())
+  work_order_id Int
+  description   String?
+  is_done       Boolean   @default(false)
+  order_index   Int       @default(0)
+  
+  work_order    WorkOrder @relation(fields: [work_order_id], references: [id])
+}
+
+model WorkOrderPart {
+  id                        Int       @id @default(autoincrement())
+  work_order_id             Int
+  part_code                 String?
+  part_name                 String?
+  quantity                  Int?
+  deducted                  Boolean   @default(false)
+  unit_price_at_consumption Float     @default(0.0)
+  
+  work_order                WorkOrder @relation(fields: [work_order_id], references: [id])
+}
+
+model Stock {
+  id         Int      @id @default(autoincrement())
+  name       String?
+  reference  String?
+  quantity   Int?
+  unit       String?
+  location   String?
+  image      String?
+  synonyms   String?
+  unit_price Float    @default(0.0)
+
+  @@map("stock_items")
+}
+
+model PartsRequest {
+  id               Int                @id @default(autoincrement())
+  work_order_id    Int
+  requested_by     Int
+  status           String             @default("pending")
+  rejection_reason String?
+  approved_by      Int?
+  created_at       String?
+  approved_at      String?
+  
+  items            PartsRequestItem[]
+  work_order       WorkOrder          @relation(fields: [work_order_id], references: [id])
+  requester        User               @relation("Requester", fields: [requested_by], references: [id])
+  approver         User?              @relation("Approver", fields: [approved_by], references: [id])
+}
+
+model PartsRequestItem {
+  id                 Int          @id @default(autoincrement())
+  request_id         Int
+  part_code          String?
+  part_name          String?
+  quantity_requested Int?
+  quantity_approved  Int?
+  
+  request            PartsRequest @relation(fields: [request_id], references: [id])
+}
+
+model StockMovement {
+  id            Int       @id @default(autoincrement())
+  part_code     String?
+  part_name     String?
+  quantity      Int?
+  type          String?
+  date          String?
+  user_id       Int
+  work_order_id Int?
+  request_id    Int?
+  
+  user          User      @relation(fields: [user_id], references: [id])
+  work_order    WorkOrder? @relation(fields: [work_order_id], references: [id])
+}
+
+model WorkSession {
+  id            Int       @id @default(autoincrement())
+  work_order_id Int
+  technician_id Int
+  start_time    String
+  end_time      String?
+  duration      Float     @default(0.0)
+  is_synced     Boolean   @default(true)
+  
+  work_order    WorkOrder @relation(fields: [work_order_id], references: [id])
+  technician    User      @relation(fields: [technician_id], references: [id])
+}

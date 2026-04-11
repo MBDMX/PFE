@@ -159,7 +159,7 @@ function ClientAppWrapper({ children }: { children: React.ReactNode }) {
 
   const isLogin = path === '/login' || path === '/';
 
-  // 1. Service Worker Registration
+  // 1. Service Worker Registration & Initial Sync
   useEffect(() => {
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
@@ -167,6 +167,11 @@ function ClientAppWrapper({ children }: { children: React.ReactNode }) {
           .then(reg => console.log('SW Registered', reg.scope))
           .catch(err => console.error('SW Failed', err));
       });
+    }
+
+    // Initial Master Data Sync
+    if (navigator.onLine) {
+      gmaoApi.syncData().catch(() => {});
     }
   }, []);
 
@@ -178,33 +183,11 @@ function ClientAppWrapper({ children }: { children: React.ReactNode }) {
     setIsSyncing(true);
     
     try {
-      const actions = await db.syncQueue.toArray();
-      let successCount = 0;
-
-      for (const action of actions) {
-        try {
-          const token = localStorage.getItem('token');
-          await axios({
-            method: action.method,
-            url: `http://${window.location.hostname}:4000/api${action.endpoint}`,
-            data: action.payload,
-            headers: token ? { Authorization: `Bearer ${token}` } : {}
-          });
-          
-          await db.syncQueue.delete(action.id!);
-          successCount++;
-        } catch (err) {
-          console.error(`Failed to sync action ${action.id}`, err);
-        }
-      }
-
-      if (successCount > 0) {
-        success('Synchronisation Terminée', `${successCount} action(s) synchronisée(s) avec succès.`);
-      } else if (actions.length > 0) {
-        toastError('Échec de Sync', 'Certaines actions n\'ont pas pu être synchronisées.');
-      }
+      // Use the centralized sync logic we just implemented in api.ts
+      await gmaoApi.syncData();
+      success('Synchronisation Terminée', 'Les actions en attente ont été traitées.');
     } catch (err) {
-      toastError('Erreur de Sync', 'Impossible de vider la file d\'attente.');
+      toastError('Erreur de Sync', 'Certaines actions n\'ont pas pu être synchronisées.');
     } finally {
       setIsSyncing(false);
     }

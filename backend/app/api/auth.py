@@ -1,8 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session
-from sqlalchemy import or_
+from prisma import Prisma
 from app.db.session import get_db
-from app.models.models import User
 from app.schemas.schemas import UserLogin, Token, UserOut, UserCreate, TokenRefreshRequest
 from app.core.security import verify_password, create_access_token, create_refresh_token, get_password_hash
 from app.api.deps import get_current_user
@@ -11,7 +9,7 @@ from app.core.config import settings
 
 router = APIRouter()
 
-def make_token_data(user: User) -> dict:
+def make_token_data(user) -> dict:
     """Single source of truth for JWT payload — always includes id, sub, role, name."""
     return {
         "id":   user.id,
@@ -21,10 +19,10 @@ def make_token_data(user: User) -> dict:
     }
 
 @router.post("/login", response_model=Token)
-def login(u: UserLogin, db: Session = Depends(get_db)):
-    user = db.query(User).filter(
-        or_(User.username == u.identifier, User.email == u.identifier)
-    ).first()
+async def login(u: UserLogin, db: Prisma = Depends(get_db)):
+    user = await db.user.find_first(
+        where={"OR": [{"username": u.identifier}, {"email": u.identifier}]}
+    )
 
     if not user:
         raise HTTPException(
@@ -50,26 +48,26 @@ def login(u: UserLogin, db: Session = Depends(get_db)):
     }
 
 @router.post("/register", response_model=UserOut)
-def register(u: UserCreate, db: Session = Depends(get_db)):
-    if db.query(User).filter(User.username == u.username).first():
+async def register(u: UserCreate, db: Prisma = Depends(get_db)):
+    existing_username = await db.user.find_unique(where={"username": u.username})
+    if existing_username:
         raise HTTPException(status_code=400, detail="Ce nom d'utilisateur est déjà utilisé")
-    if db.query(User).filter(User.email == u.email).first():
+
+    existing_email = await db.user.find_unique(where={"email": u.email})
+    if existing_email:
         raise HTTPException(status_code=400, detail="Cet email est déjà enregistré")
 
-    db_user = User(
-        username=u.username,
-        email=u.email,
-        password_hash=get_password_hash(u.password),
-        role=u.role,
-        name=u.name,
-    )
-    db.add(db_user)
-    db.commit()
-    db.refresh(db_user)
+    db_user = await db.user.create(data={
+        "username":      u.username,
+        "email":         u.email,
+        "password_hash": get_password_hash(u.password),
+        "role":          u.role,
+        "name":          u.name,
+    })
     return db_user
 
 @router.post("/refresh", response_model=Token)
-def refresh_token(req: TokenRefreshRequest, db: Session = Depends(get_db)):
+async def refresh_token(req: TokenRefreshRequest, db: Prisma = Depends(get_db)):
     try:
         payload = jwt.decode(req.refresh_token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
         if payload.get("type") != "refresh":
@@ -78,7 +76,7 @@ def refresh_token(req: TokenRefreshRequest, db: Session = Depends(get_db)):
     except JWTError:
         raise HTTPException(status_code=401, detail="Token expiré ou invalide")
 
-    user = db.query(User).filter(User.username == sub).first()
+    user = await db.user.find_unique(where={"username": sub})
     if not user:
         raise HTTPException(status_code=404, detail="Utilisateur non trouvé")
 
@@ -94,5 +92,5 @@ def refresh_token(req: TokenRefreshRequest, db: Session = Depends(get_db)):
     }
 
 @router.get("/me", response_model=UserOut)
-def get_me(current_user: User = Depends(get_current_user)):
-    return current_user
+async def get_me(current_user=Depends(get_current_user)):
+    return current_user
