@@ -1,6 +1,8 @@
 'use client';
 import { useState, useEffect, use, useRef } from 'react';
 import { useRouter } from 'next/navigation';
+import { useLiveQuery } from 'dexie-react-hooks';
+import { db } from '../../../lib/db';
 import {
   ArrowLeft,
   Calendar,
@@ -24,8 +26,8 @@ import {
   Pause,
   Trash2
 } from 'lucide-react';
-import { gmaoApi } from '@/services/api';
-import { useToast } from '@/components/ui/toast';
+import { gmaoApi } from '../../../services/api';
+import { useToast } from '../../../components/ui/toast';
 
 function TimerWidget({ workOrderId, initialTime = 0 }: { workOrderId: string, initialTime?: number }) {
   const [activeSession, setActiveSession] = useState<any>(null);
@@ -35,14 +37,23 @@ function TimerWidget({ workOrderId, initialTime = 0 }: { workOrderId: string, in
   const { success, error } = useToast();
 
   const fetchActiveSession = async () => {
+    if (typeof window === 'undefined' || !navigator.onLine) {
+      setLoading(false);
+      return;
+    }
     try {
       const session = await gmaoApi.getTimerActive();
       setActiveSession(session);
       if (session && String(session.work_order_id) === String(workOrderId)) {
         startLocalTimer(session.start_time);
+
+        // Ensure the OT in Dexie is updated with 'in_progress' if needed
+        if (typeof window !== 'undefined' && navigator.onLine) {
+          gmaoApi.getWorkOrder(workOrderId).then(wo => db.workOrders.put(wo));
+        }
       }
-    } catch (err) {
-      console.error("Failed to fetch active session", err);
+    } catch {
+      // Backend unreachable — timer widget hidden silently
     } finally {
       setLoading(false);
     }
@@ -51,7 +62,7 @@ function TimerWidget({ workOrderId, initialTime = 0 }: { workOrderId: string, in
   const startLocalTimer = (startTimeStr: string) => {
     if (intervalRef.current) clearInterval(intervalRef.current);
     const start = new Date(startTimeStr).getTime();
-    
+
     intervalRef.current = setInterval(() => {
       const now = new Date().getTime();
       setElapsed(Math.floor((now - start) / 1000));
@@ -99,7 +110,6 @@ function TimerWidget({ workOrderId, initialTime = 0 }: { workOrderId: string, in
       } else {
         success(`Session terminée !`);
       }
-      setTimeout(() => window.location.reload(), 1500);
     } catch (err: any) {
       error("Erreur lors de l'arrêt du chronomètre");
     }
@@ -150,7 +160,7 @@ function TimerWidget({ workOrderId, initialTime = 0 }: { workOrderId: string, in
                 className="w-full py-4 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white font-black uppercase text-xs tracking-widest transition-all flex items-center justify-center gap-3 shadow-lg shadow-emerald-600/20 active:scale-95 group"
               >
                 <div className="size-8 rounded-lg bg-emerald-500/30 flex items-center justify-center group-hover:scale-110 transition-transform">
-                    <Play size={16} fill="currentColor" />
+                  <Play size={16} fill="currentColor" />
                 </div>
                 Démarrer l'intervention
               </button>
@@ -160,7 +170,7 @@ function TimerWidget({ workOrderId, initialTime = 0 }: { workOrderId: string, in
                 className="w-full py-4 rounded-2xl bg-rose-600 hover:bg-rose-500 text-white font-black uppercase text-xs tracking-widest transition-all flex items-center justify-center gap-3 shadow-lg shadow-rose-600/20 active:scale-95 group"
               >
                 <div className="size-8 rounded-lg bg-rose-500/30 flex items-center justify-center group-hover:scale-110 transition-transform">
-                    <Square size={16} fill="currentColor" />
+                  <Square size={16} fill="currentColor" />
                 </div>
                 Arrêter le compteur
               </button>
@@ -177,37 +187,50 @@ export default function WorkOrderDetailPage({ params }: { params: Promise<{ id: 
   const router = useRouter();
   const { id } = use(params);
   const { success: toastSuccess, error: toastError } = useToast();
-  const [order, setOrder] = useState<any>(null);
-  const [stockItems, setStockItems] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
+
+  const order = useLiveQuery(
+    async () => {
+      // 1. Try local cache first
+      const results = await db.workOrders.toArray();
+      const found = results.find((w: any) => String(w.id) === String(id));
+
+      // 2. If not found in cache OR found but has no parts array, fetch fresh from API
+      if (!found || found.parts === undefined) {
+        try {
+          const res = await fetch(
+            `${typeof window !== 'undefined' ? `http://${window.location.hostname}:5000/api` : 'http://localhost:5000/api'}/work-orders/${id}`,
+            { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } }
+          );
+          if (res.ok) {
+            const fresh = await res.json();
+            await db.workOrders.put(fresh);
+            return fresh;
+          }
+        } catch { }
+      }
+      return found;
+    },
+    [id]
+  );
+
+  const stockItems = useLiveQuery(() => db.stock.toArray()) || [];
+
+  const loading = order === undefined;
+
   const [updating, setUpdating] = useState(false);
   const [showAddPart, setShowAddPart] = useState(false);
   const [newPart, setNewPart] = useState({ code: '', qty: 1 });
+  const [isDownloading, setIsDownloading] = useState(false);
 
-  useEffect(() => {
-    const fetchData = async () => {
-      try {
-        const [oData, sData] = await Promise.all([
-          gmaoApi.getWorkOrder(id),
-          gmaoApi.getStock()
-        ]);
-        setOrder(oData);
-        setStockItems(sData);
-      } catch (err) {
-        console.error("Failed to load data", err);
-      } finally {
-        setLoading(false);
-      }
-    };
-    fetchData();
-  }, [id]);
+  // Since order is reactive, no need for initial fetchData useEffect.
 
   async function markAsDone() {
     if (updating || !order) return;
     setUpdating(true);
     try {
       const res = await gmaoApi.updateWorkOrder(order.id, { status: 'done' });
-      setOrder(res);
+      // Dexie update is handled by handlePatch in api.ts
+
       const updates = (res as any)._stock_updates ?? [];
       if (updates.length > 0) {
         const parts = updates.map((u: any) => `${u.part} (−${u.deducted})`).join(', ');
@@ -230,14 +253,26 @@ export default function WorkOrderDetailPage({ params }: { params: Promise<{ id: 
         part_code: newPart.code,
         quantity: newPart.qty
       });
-      // Refresh order to show new parts
-      const updated = await gmaoApi.getWorkOrder(id);
-      setOrder(updated);
       setShowAddPart(false);
       setNewPart({ code: '', qty: 1 });
-      toastSuccess("Pièce ajoutée à l'OT");
-    } catch (err) {
-      console.error("Failed to add part");
+      toastSuccess("Demande envoyée au magasinier ⏳");
+    } catch (err: any) {
+      const msg = err?.response?.data?.detail || "Erreur lors de l'ajout de la pièce";
+      toastError(msg);
+      console.error("Failed to add part:", err);
+    }
+  }
+
+  async function handleDownloadPDF() {
+    if (isDownloading || !order) return;
+    setIsDownloading(true);
+    try {
+      await gmaoApi.downloadWorkOrderReport(order.id);
+      toastSuccess("Rapport PDF généré !");
+    } catch {
+      toastError("Erreur lors de la génération du PDF");
+    } finally {
+      setIsDownloading(false);
     }
   }
 
@@ -246,7 +281,7 @@ export default function WorkOrderDetailPage({ params }: { params: Promise<{ id: 
     switch (s) {
       case 'open': return { label: 'Ouvert', color: 'text-amber-400', bg: 'bg-amber-400/10', icon: Clock };
       case 'in_progress': return { label: 'En cours', color: 'text-blue-400', bg: 'bg-blue-400/10', icon: Activity };
-    case 'pending_deletion': return { label: 'Suppression en attente', color: 'text-rose-500', bg: 'bg-rose-500/10', icon: AlertTriangle };
+      case 'pending_deletion': return { label: 'Suppression en attente', color: 'text-rose-500', bg: 'bg-rose-500/10', icon: AlertTriangle };
       case 'done': return { label: 'Terminé', color: 'text-emerald-400', bg: 'bg-emerald-400/10', icon: CheckCircle };
       case 'closed': return { label: 'Clôturé', color: 'text-slate-500', bg: 'bg-slate-500/10', icon: X };
       default: return { label: 'Inconnu', color: 'text-slate-400', bg: 'bg-slate-400/10', icon: Clock };
@@ -265,10 +300,12 @@ export default function WorkOrderDetailPage({ params }: { params: Promise<{ id: 
       const res = await gmaoApi.deleteWorkOrder(order.id);
       if (res.offline || res.status === 'pending_deletion') {
         toastSuccess("Demande de suppression envoyée au responsable.");
+        // Reactive update: put back into Dexie
         const updated = await gmaoApi.getWorkOrder(id);
-        setOrder(updated);
+        await db.workOrders.put(updated);
       } else {
         toastSuccess("Ordre de travail supprimé.");
+        await db.workOrders.delete(order.id);
         router.push('/work-orders');
       }
     } catch {
@@ -295,10 +332,10 @@ export default function WorkOrderDetailPage({ params }: { params: Promise<{ id: 
     setUpdating(true);
     try {
       const res = await gmaoApi.rejectWorkOrderDeletion(order.id);
-      setOrder((res as any).data || res);
       toastSuccess("Suppression rejetée, OT restauré.");
+      // Reactive update: update local cache
       const updated = await gmaoApi.getWorkOrder(id);
-      setOrder(updated);
+      await db.workOrders.put(updated);
     } catch {
       toastError("Échec du rejet");
     } finally {
@@ -369,6 +406,15 @@ export default function WorkOrderDetailPage({ params }: { params: Promise<{ id: 
             <span className="uppercase tracking-widest font-black text-sm">{status.label}</span>
           </div>
 
+          <button
+            onClick={handleDownloadPDF}
+            disabled={isDownloading}
+            className="px-4 py-2 rounded-xl bg-white/5 hover:bg-white/10 text-white font-bold text-sm border border-white/5 transition-all flex items-center gap-2 group"
+          >
+            {isDownloading ? <Loader2 size={16} className="animate-spin" /> : <FileText size={16} className="group-hover:text-blue-400" />}
+            <span>Rapport PDF</span>
+          </button>
+
           {/* Approval Actions for Managers */}
           {order.status === 'pending_deletion' && isManager && (
             <div className="flex items-center gap-2">
@@ -413,8 +459,6 @@ export default function WorkOrderDetailPage({ params }: { params: Promise<{ id: 
           )}
         </div>
       </div>
-
-
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
 
@@ -490,11 +534,10 @@ export default function WorkOrderDetailPage({ params }: { params: Promise<{ id: 
                       onClick={async () => {
                         try {
                           const updatedStep = await gmaoApi.toggleStep(step.id, !step.is_done);
-                          // Update local state for immediate feedback
-                          setOrder({
-                            ...order,
-                            steps: order.steps.map((s: any) => s.id === step.id ? { ...s, is_done: !step.is_done } : s)
-                          });
+                          // ✅ Reactive: Refresh the whole OT in Dexie to reflect step change
+                          const freshWO = await gmaoApi.getWorkOrder(id);
+                          await db.workOrders.put(freshWO);
+
                           if (updatedStep.offline) {
                             toastSuccess("Action enregistrée (Mode Offline)");
                           }
@@ -502,22 +545,19 @@ export default function WorkOrderDetailPage({ params }: { params: Promise<{ id: 
                           toastError("Erreur lors de la mise à jour de l'étape");
                         }
                       }}
-                      className={`flex items-center gap-4 p-4 rounded-2xl border transition-all text-left group ${
-                        step.is_done 
-                          ? 'bg-emerald-500/5 border-emerald-500/20 opacity-80' 
-                          : 'bg-white/5 border-white/5 hover:border-sky-500/30'
-                      }`}
+                      className={`flex items-center gap-4 p-4 rounded-2xl border transition-all text-left group ${step.is_done
+                        ? 'bg-emerald-500/5 border-emerald-500/20 opacity-80'
+                        : 'bg-white/5 border-white/5 hover:border-sky-500/30'
+                        }`}
                     >
-                      <div className={`size-6 rounded-lg border-2 flex items-center justify-center transition-all ${
-                        step.is_done 
-                          ? 'bg-emerald-500 border-emerald-500 text-white' 
-                          : 'border-slate-700 group-hover:border-sky-500/50'
-                      }`}>
+                      <div className={`size-6 rounded-lg border-2 flex items-center justify-center transition-all ${step.is_done
+                        ? 'bg-emerald-500 border-emerald-500 text-white'
+                        : 'border-slate-700 group-hover:border-sky-500/50'
+                        }`}>
                         {step.is_done && <Check size={14} strokeWidth={4} />}
                       </div>
-                      <span className={`text-sm font-bold transition-all ${
-                        step.is_done ? 'text-slate-500 line-through' : 'text-slate-200'
-                      }`}>
+                      <span className={`text-sm font-bold transition-all ${step.is_done ? 'text-slate-500 line-through' : 'text-slate-200'
+                        }`}>
                         {step.description}
                       </span>
                     </button>
@@ -571,12 +611,12 @@ export default function WorkOrderDetailPage({ params }: { params: Promise<{ id: 
                   onClick={() => setShowAddPart(true)}
                   className="w-full py-3 rounded-xl border border-dashed border-white/10 text-slate-500 hover:text-blue-400 hover:border-blue-500/30 hover:bg-blue-500/5 transition-all font-bold text-xs uppercase tracking-widest flex items-center justify-center gap-2"
                 >
-                  <Plus size={14} /> Ajouter une pièce consommée
+                  <Plus size={14} /> Demander une pièce (approbation requise)
                 </button>
               ) : (
                 <div className="azure-card p-4 bg-slate-950/30 space-y-4">
                   <div className="flex items-center justify-between mb-2">
-                    <span className="text-[0.6rem] font-black text-blue-400 uppercase tracking-widest">Nouvelle Consommation</span>
+                    <span className="text-[0.6rem] font-black text-amber-400 uppercase tracking-widest">Demande de Pièce ⏳ Approbation Magasinier</span>
                     <button onClick={() => setShowAddPart(false)}><X size={14} className="text-slate-500" /></button>
                   </div>
                   <div className="grid grid-cols-3 gap-3">
@@ -605,7 +645,7 @@ export default function WorkOrderDetailPage({ params }: { params: Promise<{ id: 
                     onClick={handleAddPart}
                     className="w-full py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg font-black text-[0.65rem] uppercase tracking-widest transition-all"
                   >
-                    Enregistrer la pièce
+                    Envoyer la demande au magasinier
                   </button>
                 </div>
               )}

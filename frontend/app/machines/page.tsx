@@ -24,6 +24,7 @@ import {
     ArrowUpRight,
     CalendarClock,
     Zap,
+    RefreshCw,
 } from 'lucide-react';
 import api, { gmaoApi } from '@/services/api';
 
@@ -54,6 +55,23 @@ export default function MachinesPage() {
     const [machineOrders, setMachineOrders] = useState<any[]>([]);
     const [loadingOrders, setLoadingOrders] = useState(false);
     const [triggeringMaintenance, setTriggeringMaintenance] = useState(false);
+    const [isSyncing, setIsSyncing] = useState(false);
+
+    async function handleSyncSAP() {
+        setIsSyncing(true);
+        try {
+            const res = await gmaoApi.syncMachinesFromSap();
+            await fetchMachines();
+            const event = new CustomEvent('api:success', { detail: res.message || 'Synchronisation SAP terminée' });
+            window.dispatchEvent(event);
+        } catch (err: any) {
+            console.error('SAP Sync failed', err);
+            const event = new CustomEvent('api:error', { detail: 'Échec de la synchronisation SAP' });
+            window.dispatchEvent(event);
+        } finally {
+            setIsSyncing(false);
+        }
+    };
 
     async function handleSelectMachine(m: Machine) {
         setSelectedMachine(m);
@@ -147,6 +165,14 @@ export default function MachinesPage() {
                     <h1 className="text-3xl font-black bg-gradient-to-r from-white to-slate-400 bg-clip-text text-transparent tracking-tight">Parc Machines</h1>
                     <p className="text-sm font-bold text-slate-500 uppercase tracking-widest mt-1">Inventaire et État de Santé des Équipements (Source SAP)</p>
                 </div>
+                <button
+                    onClick={handleSyncSAP}
+                    disabled={isSyncing}
+                    className="flex items-center gap-2 px-6 py-3 rounded-2xl bg-white/5 hover:bg-white/10 border border-white/5 hover:border-blue-500/30 text-white font-black uppercase text-xs tracking-widest transition-all group disabled:opacity-50"
+                >
+                    <RefreshCw size={16} className={`${isSyncing ? 'animate-spin' : 'group-hover:rotate-180 transition-transform duration-500'}`} />
+                    {isSyncing ? 'Synchronisation...' : 'Synchroniser SAP'}
+                </button>
             </header>
 
             {/* Controls Bar */}

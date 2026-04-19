@@ -10,12 +10,33 @@ import { WorkOrder, isOverdue } from './_components/types';
 import KPICard from './_components/KPICard';
 import CalendarWidget from './_components/CalendarWidget';
 import Top5Widget from './_components/Top5Widget';
+import NotificationCenter from '../../../components/ui/NotificationCenter';
+
+import { useLiveQuery } from 'dexie-react-hooks';
+import { db } from '../../../lib/db';
 
 export default function TechnicianDashboard() {
-    const [workOrders, setWorkOrders] = useState<WorkOrder[]>([]);
-    const [isLoading, setIsLoading] = useState(true);
     const [userName, setUserName] = useState('');
     const [userId, setUserId] = useState('');
+
+    // ✅ REACTIVE: Auto-refreshes when IndexedDB changes
+    const workOrders = useLiveQuery(() => db.workOrders.toArray()) || [];
+    const isLoading = useLiveQuery(() => db.workOrders.count()) === undefined;
+    const [notifCount, setNotifCount] = useState(0);
+
+    useEffect(() => {
+        const fetchCount = () => {
+            const token = localStorage.getItem('token');
+            if (token) {
+                fetch(`http://${window.location.hostname}:5000/api/parts-requests/pending-count`, {
+                    headers: { Authorization: `Bearer ${token}` }
+                }).then(r => r.json()).then(d => { if (d.count !== undefined) setNotifCount(d.count); }).catch(() => { });
+            }
+        };
+        fetchCount();
+        const interval = setInterval(fetchCount, 5000); // 5 sec poll
+        return () => clearInterval(interval);
+    }, []);
 
     useEffect(() => {
         if (typeof window !== 'undefined') {
@@ -30,19 +51,9 @@ export default function TechnicianDashboard() {
                 } catch { }
             }
         }
-        fetchData();
+        // Background sync
+        gmaoApi.getWorkOrders().catch(() => { });
     }, []);
-
-    const fetchData = async () => {
-        try {
-            const data = await gmaoApi.getWorkOrders();
-            setWorkOrders(data);
-        } catch (e) {
-            console.error('Failed to fetch work orders', e);
-        } finally {
-            setIsLoading(false);
-        }
-    };
 
     // ── KPIs ──
     const total = workOrders.length;
@@ -98,12 +109,7 @@ export default function TechnicianDashboard() {
                         <Wrench size={16} className="text-blue-400" />
                         <span className="text-[0.65rem] font-bold text-blue-400 uppercase tracking-widest">Technicien</span>
                     </div>
-                    <div className="size-11 rounded-2xl bg-slate-900 border border-white/5 flex items-center justify-center text-slate-400 hover:text-white transition-all cursor-pointer relative">
-                        <Bell size={20} />
-                        {overdueCount > 0 && (
-                            <span className="absolute top-2 right-2 size-2 bg-rose-500 rounded-full border-2 border-slate-950" />
-                        )}
-                    </div>
+                    <NotificationCenter count={notifCount} role="technician" />
                 </div>
             </header>
 

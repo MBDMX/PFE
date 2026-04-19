@@ -443,6 +443,68 @@ def order_stock(
         "sap_po": f"SAP-PO-{1000 + item.id}"
     }
 
+@router.post("/stock/movements/manual")
+def create_manual_movement(
+    data: dict,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """PDA — Mouvement manuel (entrée ou sortie de stock par le magasinier)"""
+    part_id  = data.get("part_id")
+    mov_type = data.get("type", "OUT").upper()
+    qty      = int(data.get("quantity", 1))
+
+    item = db.query(Stock).filter(Stock.id == part_id).first()
+    if not item:
+        raise HTTPException(status_code=404, detail="Pièce introuvable")
+
+    if mov_type == "OUT":
+        if item.quantity < qty:
+            raise HTTPException(status_code=400, detail=f"Stock insuffisant ({item.quantity} disponibles)")
+        item.quantity -= qty
+    else:  # IN
+        item.quantity += qty
+
+    movement = StockMovement(
+        part_code=item.reference,
+        part_name=item.name,
+        quantity=qty,
+        type=mov_type,
+        date=datetime.utcnow().strftime("%Y-%m-%d %H:%M"),
+        user_id=current_user.id
+    )
+    db.add(movement)
+    db.commit()
+    db.refresh(item)
+
+    return {
+        "status": "success",
+        "message": f"Mouvement {mov_type} de {qty} × {item.name} enregistré",
+        "new_quantity": item.quantity
+    }
+
+@router.patch("/stock/{part_id}/location")
+def update_part_location(
+    part_id: int,
+    data: dict,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """PDA — Mise à jour de l'emplacement (rayon) d'une pièce"""
+    item = db.query(Stock).filter(Stock.id == part_id).first()
+    if not item:
+        raise HTTPException(status_code=404, detail="Pièce introuvable")
+
+    new_location = data.get("location", "").strip()
+    if not new_location:
+        raise HTTPException(status_code=400, detail="Emplacement invalide")
+
+    item.location = new_location
+    db.commit()
+
+    return {"status": "success", "location": item.location}
+
+
 @router.get("/machines/{machine_id}/work-orders", response_model=list[WorkOrderSchema])
 def get_machine_work_orders(machine_id: int, db: Session = Depends(get_db)):
     machine = db.query(Machine).filter(Machine.id == machine_id).first()

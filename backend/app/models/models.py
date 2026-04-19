@@ -12,6 +12,7 @@ class User(Base):
     name = Column(String)
     manager_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     team = Column(String, nullable=True)
+    face_descriptor = Column(Text, nullable=True)
 
 class Machine(Base):
     __tablename__ = "machines"

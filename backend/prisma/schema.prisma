@@ -17,6 +17,8 @@ model User {
   manager_id      Int?
   team            String?
   
+  face_descriptor String?
+  
   parts_requested PartsRequest[] @relation("Requester")
   parts_approved  PartsRequest[] @relation("Approver")
   stock_movements StockMovement[]
