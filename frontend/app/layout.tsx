@@ -263,6 +263,14 @@ function ClientAppWrapper({ children }: { children: React.ReactNode }) {
             Navigation
           </div>
 
+          {(user?.role === 'magasinier' || user?.role === 'admin') && (
+            <Link href="/dashboard/magasinier" className={`sidebar-link ${path.startsWith('/dashboard/magasinier') ? 'active' : ''}`}>
+              <Warehouse size={20} />
+              <span>Dashboard</span>
+              {path.startsWith('/dashboard/magasinier') && <ChevronRight size={14} className="ml-auto text-blue-400" />}
+            </Link>
+          )}
+
           {user?.role !== 'magasinier' && (
             <>
               <Link href={getDashHref()} className={`sidebar-link ${path.startsWith('/dashboard') && !path.startsWith('/dashboard/magasinier') ? 'active' : ''}`}>
@@ -296,14 +304,6 @@ function ClientAppWrapper({ children }: { children: React.ReactNode }) {
               <Users size={20} />
               <span>Supervision Équipe</span>
               {path.startsWith('/dashboard/manager/equipe') && <ChevronRight size={14} className="ml-auto text-blue-400" />}
-            </Link>
-          )}
-
-          {(user?.role === 'magasinier' || user?.role === 'admin') && (
-            <Link href="/dashboard/magasinier" className={`sidebar-link ${path.startsWith('/dashboard/magasinier') ? 'active' : ''}`}>
-              <Warehouse size={20} />
-              <span>Bon de Sortie</span>
-              {path.startsWith('/dashboard/magasinier') && <ChevronRight size={14} className="ml-auto text-blue-400" />}
             </Link>
           )}
         </nav>
