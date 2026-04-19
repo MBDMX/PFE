@@ -1,6 +1,6 @@
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from app.api import auth, machines, work_orders, stock, stats, system, users, magasinier, sap
+from app.api import auth, machines, work_orders, stock, stats, system, users, magasinier, sap, face_auth
 from app.db.session import prisma
 from app.core.websocket import manager
 
@@ -35,7 +35,7 @@ async def websocket_endpoint(websocket: WebSocket):
 
 # Include Modular Routers
 app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
-app.include_router(system.router, prefix="/api") 
+app.include_router(system.router, prefix="/api")
 app.include_router(machines.router, prefix="/api")
 app.include_router(work_orders.router, prefix="/api")
 app.include_router(stock.router, prefix="/api")
@@ -44,6 +44,7 @@ app.include_router(stats.router, prefix="/api")
 app.include_router(users.router, prefix="/api")
 app.include_router(magasinier.router, prefix="/api")
 app.include_router(sap.router, prefix="/api")
+app.include_router(face_auth.router, prefix="/api", tags=["face-auth"])
 
 if __name__ == "__main__":
     import uvicorn

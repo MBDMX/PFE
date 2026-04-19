@@ -421,6 +421,13 @@ export const gmaoApi = {
         }
     },
     getStockMovements: () => handleGet('/stock/movements', db.stockMovements),
+    createStockMovement: (data: { part_id: number; type: 'IN' | 'OUT'; quantity: number }) =>
+        handlePost('/stock/movements/manual', data, 'CREATE_STOCK_MOVEMENT'),
+    updatePartLocation: async (partId: number, location: string) => {
+        const res = await api.patch(`/stock/${partId}/location`, { location });
+        return res.data;
+    },
+
     createPartsRequest: (data: any) => handlePost('/parts-requests', data, 'CREATE_PARTS_REQUEST'),
     getPartsRequests: (statusFilter?: string) => {
         const endpoint = statusFilter ? `/parts-requests?status_filter=${statusFilter}` : '/parts-requests';
@@ -429,6 +436,10 @@ export const gmaoApi = {
     approvePartsRequest: (reqId: number) => handlePatch(`/parts-requests/${reqId}/approve`, {}, 'APPROVE_PARTS_REQUEST'),
     rejectPartsRequest: (reqId: number, reason: string) => handlePatch(`/parts-requests/${reqId}/reject`, { reason }, 'REJECT_PARTS_REQUEST'),
     
+    // BIOMETRIC AUTH
+    enrollFace: (descriptor: number[]) => api.post('/face/enroll', { descriptor }),
+    faceLogin: (descriptor: number[]) => api.post('/face/login', { descriptor }),
+
     // TIME TRACKING
     getTimerActive: () => handleGet('/technician/timer/active'),
     startTimer: (woId: number | string) => handlePost(`/work-orders/${woId}/timer/start`, {}, 'TIMER_START'),
@@ -436,6 +447,7 @@ export const gmaoApi = {
 
     // SYSTEM ADMINISTRATION
     resetSystem: () => handlePost('/system/reset', {}, 'RESET_SYSTEM'),
+    register: (data: any) => handlePost('/auth/register', data, 'CREATE_USER'),
 
     // AUTH HELPERS
     getCurrentUser: () => {

@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { User, Lock, Wrench, ArrowRight, Eye, EyeOff } from 'lucide-react';
 import api from '@/services/api';
+import { FaceLogin } from '@/components/FaceLogin';
 
 // Role → dashboard route map (read-only, never user-controlled)
 const ROLE_ROUTES: Record<string, string> = {
@@ -185,6 +186,25 @@ export default function LoginPage() {
                 <>Se connecter <ArrowRight size={18} /></>
               )}
             </button>
+          </div>
+
+          {/* Biometric Login */}
+          <div className="pt-4 space-y-4">
+            <div className="flex items-center gap-4 py-2">
+              <div className="h-[1px] flex-1 bg-white/5" />
+              <span className="text-[10px] font-black text-white/20 uppercase tracking-[0.3em]">Ou</span>
+              <div className="h-[1px] flex-1 bg-white/5" />
+            </div>
+
+            <FaceLogin 
+              onSuccess={(data) => {
+                localStorage.setItem('token', data.access_token);
+                if (data.refresh_token) localStorage.setItem('refresh_token', data.refresh_token);
+                localStorage.setItem('user', JSON.stringify(data.user));
+                const route = ROLE_ROUTES[data.user.role];
+                if (route) router.replace(route);
+              }}
+            />
           </div>
 
         </div>

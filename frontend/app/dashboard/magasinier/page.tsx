@@ -1,14 +1,15 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Warehouse, LayoutDashboard, ClipboardList, History, Bell } from 'lucide-react';
+import { Warehouse, LayoutDashboard, ClipboardList, History, Bell, ScanLine } from 'lucide-react';
 import MagDashboard from './_components/MagDashboard';
 import RequestManager from './_components/RequestManager';
 import Traceability from './_components/Traceability';
+import PdaScanner from './_components/PdaScanner';
 import { gmaoApi } from '../../../services/api';
 import NotificationCenter from '../../../components/ui/NotificationCenter';
 
-type TabType = 'dashboard' | 'requests' | 'history';
+type TabType = 'dashboard' | 'requests' | 'history' | 'scanner';
 
 export default function MagasinierPage() {
     const [activeTab, setActiveTab] = useState<TabType>('dashboard');
@@ -29,9 +30,9 @@ export default function MagasinierPage() {
     }, []);
 
     const tabs = [
-        { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
-        { id: 'requests', label: 'Demandes Pièces', icon: ClipboardList },
-        { id: 'history', label: 'Traçabilité Stock', icon: History },
+        { id: 'dashboard', label: 'Dashboard',        icon: LayoutDashboard },
+        { id: 'requests',  label: 'Demandes Pièces',   icon: ClipboardList    },
+        { id: 'history',   label: 'Traçabilité Stock', icon: History          },
     ];
 
     return (
@@ -55,33 +56,53 @@ export default function MagasinierPage() {
                 </div>
             </header>
 
-            {/* ── Tab Selector ── */}
-            <div className="flex items-center gap-1 p-1 bg-slate-950/50 backdrop-blur-md rounded-2xl border border-white/5 w-fit ml-2">
-                {tabs.map((tab) => (
-                    <button
-                        key={tab.id}
-                        onClick={() => setActiveTab(tab.id as TabType)}
-                        className={`relative flex items-center gap-2 px-6 py-2.5 rounded-xl text-[0.65rem] font-black uppercase tracking-widest transition-all duration-300 ${activeTab === tab.id
-                            ? 'bg-amber-500/20 text-amber-500 border border-amber-500/30 shadow-lg shadow-amber-500/5'
-                            : 'text-slate-500 hover:text-slate-200 hover:bg-white/5'
-                            }`}
+            {/* ── Toolbar Row ── */}
+            <div className="relative flex items-center justify-between px-2 -mb-2">
+                {/* ── Tab Selector ── */}
+                <div className="flex items-center gap-1 p-1 bg-slate-950/50 backdrop-blur-md rounded-2xl border border-white/5 w-fit">
+                    {tabs.map((tab) => (
+                        <button
+                            key={tab.id}
+                            onClick={() => setActiveTab(tab.id as TabType)}
+                            className={`relative flex items-center gap-2 px-6 py-2.5 rounded-xl text-[0.65rem] font-black uppercase tracking-widest transition-all duration-300 ${activeTab === tab.id
+                                ? 'bg-amber-500/20 text-amber-500 border border-amber-500/30 shadow-lg shadow-amber-500/5'
+                                : 'text-slate-500 hover:text-slate-200 hover:bg-white/5'
+                                }`}
+                        >
+                            <tab.icon size={14} />
+                            {tab.label}
+                            {tab.id === 'requests' && pendingCount > 0 && (
+                                <span className="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-rose-500 text-[10px] text-white">
+                                    {pendingCount}
+                                </span>
+                            )}
+                        </button>
+                    ))}
+                </div>
+
+                {/* ── PDA Scanner Shortcut ── */}
+                <div className="flex items-center gap-2">
+                    <button 
+                        onClick={() => setActiveTab('scanner')}
+                        className={`flex items-center gap-4 px-8 py-3 rounded-2xl transition-all duration-500 border-2 ${
+                            activeTab === 'scanner' 
+                            ? 'bg-amber-500/20 border-amber-500/50 text-amber-500 shadow-[0_0_40px_rgba(245,158,11,0.3)] scale-110' 
+                            : 'bg-slate-900/80 border-white/10 text-slate-400 hover:text-white hover:border-white/20 hover:scale-105'
+                        }`}
+                        title="Scanner PDA"
                     >
-                        <tab.icon size={14} />
-                        {tab.label}
-                        {tab.id === 'requests' && pendingCount > 0 && (
-                            <span className="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-rose-500 text-[10px] text-white">
-                                {pendingCount}
-                            </span>
-                        )}
+                        <ScanLine size={36} strokeWidth={2.5} />
+                        <span className="text-base font-black uppercase tracking-widest">Scanner PDA</span>
                     </button>
-                ))}
+                </div>
             </div>
 
             {/* ── Tab Content ── */}
             <div className="px-1 min-h-[60vh]">
                 {activeTab === 'dashboard' && <MagDashboard />}
-                {activeTab === 'requests' && <RequestManager />}
-                {activeTab === 'history' && <Traceability />}
+                {activeTab === 'requests'  && <RequestManager />}
+                {activeTab === 'history'   && <Traceability />}
+                {activeTab === 'scanner'   && <PdaScanner />}
             </div>
 
             {/* ── Footer / Status ── */}
