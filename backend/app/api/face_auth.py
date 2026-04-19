@@ -8,6 +8,8 @@ from app.api.auth import make_token_data
 from app.core.security import create_access_token, create_refresh_token
 from pydantic import BaseModel
 
+from app.api.deps import get_current_user
+
 router = APIRouter()
 
 class FaceDescriptorSchema(BaseModel):
@@ -21,11 +23,11 @@ def euclidean_distance(v1: List[float], v2: List[float]) -> float:
 @router.post("/face/enroll")
 async def enroll_face(
     data: FaceDescriptorSchema, 
-    current_user_id: int = 1 # Temporary or from dependency
+    current_user = Depends(get_current_user)
 ):
     """Saves the 128-float descriptor as a JSON string for the current user using Prisma."""
     await prisma.user.update(
-        where={"id": current_user_id},
+        where={"id": current_user.id},
         data={"face_descriptor": json.dumps(data.descriptor)}
     )
     return {"message": "Visage enregistré avec succès"}
