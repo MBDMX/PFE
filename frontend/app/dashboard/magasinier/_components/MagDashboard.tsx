@@ -3,23 +3,30 @@ import { useState, useEffect } from 'react';
 import { Clock, CheckCircle, XCircle, AlertTriangle, Package, Activity } from 'lucide-react';
 import { gmaoApi } from '../../../../services/api';
 
+import { useLiveQuery } from 'dexie-react-hooks';
+import { db } from '../../../../lib/db';
+
 export default function MagDashboard() {
-    const [stats, setStats] = useState<any>(null);
+    // ✅ REACTIVE: Auto-update on DB changes
+    const partsRequests = useLiveQuery(() => db.partsRequests?.toArray() || []) || [];
+    const stockItems = useLiveQuery(() => db.stock.toArray()) || [];
+    
+    const [fetchedStats, setFetchedStats] = useState<any>(null);
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
-        const fetchStats = async () => {
-            try {
-                const data = await gmaoApi.getMagasinierStats();
-                setStats(data);
-            } catch (err) {
-                console.error("Failed to load magasinier stats", err);
-            } finally {
-                setLoading(false);
-            }
-        };
-        fetchStats();
+        gmaoApi.getMagasinierStats().then(data => {
+            setFetchedStats(data);
+            setLoading(false);
+        });
     }, []);
+
+    // Reactive computation for basic stats
+    const stats = fetchedStats ? {
+        ...fetchedStats,
+        critical_stock_alerts: stockItems.filter(i => (i.quantity || 0) < 5).length,
+        pending_requests: partsRequests.filter(r => r.status === 'pending').length,
+    } : null;
 
     if (loading) return <div className="h-64 flex items-center justify-center text-slate-500 animate-pulse uppercase font-black text-xs tracking-widest text-center">Initialisation du Dashboard Magasin...</div>;
 

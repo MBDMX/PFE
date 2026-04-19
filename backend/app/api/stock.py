@@ -5,6 +5,7 @@ from prisma import Prisma
 from app.db.session import get_db
 from app.api.deps import role_required, get_current_user
 from app.schemas.schemas import Stock as StockSchema, PartsRequestOut, StockMovement as StockMovementSchema
+from app.core.websocket import manager
 
 router = APIRouter(prefix="/stock", tags=["stock"])
 
@@ -58,6 +59,9 @@ async def create_parts_request(data: dict, db: Prisma = Depends(get_db), current
             "part_name": it.get("part_name") or it.get("name"),
             "quantity_requested": it.get("quantity") or it.get("quantity_requested")
         })
+    
+    # Notify storekeepers in real-time
+    await manager.broadcast({"event": "NEW_PARTS_REQUEST", "id": new_request.id})
         
     return await db.partsrequest.find_unique(where={"id": new_request.id}, include={"items": True})
 
@@ -67,14 +71,12 @@ async def approve_parts_request(req_id: int, db: Prisma = Depends(get_db), curre
     if not pr: raise HTTPException(status_code=404, detail="Demande introuvable")
     
     for it in pr.items:
-        # Find the stock item by its code
         stock = await db.stock.find_first(where={"reference": it.part_code})
         if stock:
             qty = it.quantity_requested or 0
             new_qty = max(0, (stock.quantity or 0) - qty)
             await db.stock.update(where={"id": stock.id}, data={"quantity": new_qty})
             
-            # Record movement
             await db.stockmovement.create(data={
                 "part_code": stock.reference,
                 "part_name": stock.name,
@@ -85,8 +87,7 @@ async def approve_parts_request(req_id: int, db: Prisma = Depends(get_db), curre
                 "work_order": {"connect": {"id": pr.work_order_id}} if pr.work_order_id else None
             })
             
-            # Officially add to WorkOrder (WorkOrderPart)
-            # Schema has: work_order_id, part_code, part_name, quantity, ...
+            # WorkOrderPart is created only when magasinier approves
             await db.workorderpart.create(data={
                 "work_order": {"connect": {"id": pr.work_order_id}},
                 "part_code": it.part_code,
@@ -95,7 +96,16 @@ async def approve_parts_request(req_id: int, db: Prisma = Depends(get_db), curre
                 "unit_price_at_consumption": stock.unit_price or 0.0
             })
             
-    return await db.partsrequest.update(
+            # Alert if stock goes critical
+            if new_qty < 5:
+                await manager.broadcast({
+                    "event": "LOW_STOCK_ALERT",
+                    "part_code": stock.reference,
+                    "part_name": stock.name,
+                    "quantity": new_qty
+                })
+
+    updated = await db.partsrequest.update(
         where={"id": req_id}, 
         data={
             "status": "approved",
@@ -103,12 +113,49 @@ async def approve_parts_request(req_id: int, db: Prisma = Depends(get_db), curre
             "approved_by": int(current_user.id if hasattr(current_user, 'id') else current_user['id'])
         }
     )
+    
+    # Broadcast rich event — frontend notifies the requester
+    await manager.broadcast({
+        "event": "PARTS_APPROVED",
+        "id": req_id,
+        "wo_id": pr.work_order_id,
+        "requester_id": pr.requested_by
+    })
+    await manager.broadcast({"event": "PARTS_REQUEST_UPDATED", "id": req_id, "status": "approved"})
+    await manager.broadcast({"event": "STOCK_UPDATED"})
+    await manager.broadcast({"event": "WORK_ORDER_UPDATED", "id": pr.work_order_id})
+    return updated
 
 @pr_router.patch("/{req_id}/reject")
 async def reject_parts_request(req_id: int, data: dict, db: Prisma = Depends(get_db), current_user = Depends(role_required(["admin", "magasinier"]))):
-    return await db.partsrequest.update(where={"id": req_id}, data={
+    pr = await db.partsrequest.find_unique(where={"id": req_id})
+    updated = await db.partsrequest.update(where={"id": req_id}, data={
         "status": "rejected", 
         "rejection_reason": data.get("reason", ""),
-        "approved_at": datetime.utcnow().isoformat() + "Z", # Using this as 'processed_at'
+        "approved_at": datetime.utcnow().isoformat() + "Z",
         "approved_by": int(current_user.id if hasattr(current_user, 'id') else current_user['id'])
     })
+    await manager.broadcast({
+        "event": "PARTS_REJECTED",
+        "id": req_id,
+        "wo_id": pr.work_order_id if pr else None,
+        "requester_id": pr.requested_by if pr else None,
+        "reason": data.get("reason", "")
+    })
+    await manager.broadcast({"event": "PARTS_REQUEST_UPDATED", "id": req_id, "status": "rejected"})
+    return updated
+
+@pr_router.get("/pending-count")
+async def get_pending_parts_requests_count(db: Prisma = Depends(get_db), current_user = Depends(get_current_user)):
+    """Returns the count of pending parts requests. Used for sidebar notification badges."""
+    user_id = int(current_user.id if hasattr(current_user, 'id') else current_user['id'])
+    role = current_user.role if hasattr(current_user, 'role') else current_user.get('role', '')
+    
+    if role in ('magasinier', 'admin'):
+        # All pending requests
+        count = await db.partsrequest.count(where={"status": "pending"})
+    else:
+        # My pending requests (as requester)
+        count = await db.partsrequest.count(where={"requested_by": user_id, "status": "pending"})
+    
+    return {"count": count, "role": role}

@@ -10,6 +10,7 @@ import OTStatusChart from './_components/OTStatusChart';
 import RecentOTTable from './_components/RecentOTTable';
 import AlertsWidget from './_components/AlertsWidget';
 import ReliabilityWidget from './_components/ReliabilityWidget';
+import NotificationCenter from '../../../components/ui/NotificationCenter';
 import { ManagerStats, WorkOrder } from './_components/types';
 
 function getUser() {
@@ -21,18 +22,52 @@ function getUser() {
     } catch { return { name: '', sub: '' }; }
 }
 
+import { useLiveQuery } from 'dexie-react-hooks';
+import { db } from '../../../lib/db';
+
 export default function ManagerDashboard() {
-    const [stats, setStats] = useState<ManagerStats | null>(null);
-    const [wos, setWos] = useState<WorkOrder[]>([]);
-    const [loading, setLoading] = useState(true);
     const user = typeof window !== 'undefined' ? getUser() : { name: '', sub: '' };
 
+    // ✅ REACTIVE: Real-time queries on local cache
+    const wos = useLiveQuery(() => db.workOrders.toArray()) || [];
+    const stockItems = useLiveQuery(() => db.stock.toArray()) || [];
+
+    // We still use the API stats but supplement with local reactive counts
+    const [fetchedStats, setFetchedStats] = useState<ManagerStats | null>(null);
+    const [loading, setLoading] = useState(true);
+    const [notifCount, setNotifCount] = useState(0);
+
     useEffect(() => {
-        Promise.all([
-            gmaoApi.getManagerStats().then(data => setStats(data)),
-            gmaoApi.getWorkOrders().then(data => setWos(data)),
-        ]).finally(() => setLoading(false));
+        const fetchCount = () => {
+            const token = localStorage.getItem('token');
+            if (token) {
+                fetch(`http://${window.location.hostname}:5000/api/parts-requests/pending-count`, {
+                    headers: { Authorization: `Bearer ${token}` }
+                }).then(r => r.json()).then(d => { if (d.count !== undefined) setNotifCount(d.count); }).catch(() => { });
+            }
+        };
+        fetchCount();
+        const interval = setInterval(fetchCount, 5000); // 5 sec poll
+        return () => clearInterval(interval);
     }, []);
+
+    useEffect(() => {
+        gmaoApi.getManagerStats().then(data => {
+            setFetchedStats(data);
+            setLoading(false);
+        });
+        gmaoApi.getWorkOrders().catch(() => { });
+    }, []);
+
+    // Reactive Stats override
+    const stats: ManagerStats | null = fetchedStats ? {
+        ...fetchedStats,
+        totalOT: wos.length,
+        doneOT: wos.filter(o => o.status === 'done' || o.status === 'closed').length,
+        openOT: wos.filter(o => o.status === 'open' || o.status === 'pending_approval').length,
+        inProgressOT: wos.filter(o => o.status === 'in_progress').length,
+        lowStock: stockItems.filter(i => (i.quantity || 0) <= 5).length,
+    } : null;
 
     const displayName = user.name || user.sub || 'Responsable';
 
@@ -62,12 +97,7 @@ export default function ManagerDashboard() {
                         <TrendingUp size={16} className="text-violet-400" />
                         <span className="text-[0.65rem] font-bold text-violet-400 uppercase tracking-widest">Responsable</span>
                     </div>
-                    <div className="size-11 rounded-2xl bg-slate-900 border border-white/5 flex items-center justify-center text-slate-400 hover:text-white transition-all cursor-pointer relative">
-                        <Bell size={20} />
-                        {stats && stats.criticalOT > 0 && (
-                            <span className="absolute top-2 right-2 size-2 bg-rose-500 rounded-full border-2 border-slate-950 animate-ping" />
-                        )}
-                    </div>
+                    <NotificationCenter count={notifCount} role="manager" />
                 </div>
             </header>
 

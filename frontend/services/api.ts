@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { db } from '../lib/db';
+import { db, type OfflineAction } from '../lib/db';
 
 const apiBaseUrl = typeof window !== 'undefined'
     ? `http://${window.location.hostname}:5000/api`
@@ -46,35 +46,103 @@ api.interceptors.response.use(
 
 async function handleGet(endpoint: string, table?: any) {
     const isOnline = typeof window !== 'undefined' && navigator.onLine;
+    const url = endpoint.includes('?') ? `${endpoint}&t=${Date.now()}` : `${endpoint}?t=${Date.now()}`;
 
-    // If we have a table, try to serve from cache first ONLY if truly offline
-    if (typeof window !== 'undefined' && !isOnline && table) {
-        return await table.toArray();
-    }
-
-    try {
-        const res = await api.get(endpoint);
-        // Background update of IndexedDB if table is provided
-        if (table && Array.isArray(res.data) && typeof window !== 'undefined') {
-            try {
-                await table.bulkPut(res.data);
-            } catch (dbErr) {
-                console.warn(`Dexie Bulk Sync Error on ${endpoint}:`, dbErr);
+    // 1. ONLINE: Network-First
+    if (isOnline) {
+        try {
+            const res = await api.get(url);
+            if (table && Array.isArray(res.data)) {
+                // SYNC DATA: Update existing, add new, remove deleted
+                await db.transaction('rw', table, async () => {
+                    const freshData = res.data;
+                    const freshIds = freshData.map((x: any) => x.id).filter(Boolean);
+                    
+                    // Prune deleted items
+                    const allKeys = await table.toCollection().primaryKeys();
+                    const keysToDelete = allKeys.filter((k: any) => !freshIds.includes(k));
+                    if (keysToDelete.length > 0) await table.bulkDelete(keysToDelete);
+                    
+                    // Update/Add
+                    await table.bulkPut(freshData);
+                });
             }
+            return res.data;
+        } catch (err) {
+            console.warn(`GET ${endpoint} failed, falling back to cache...`, err);
+            // Fall through to cache
         }
-        return res.data;
-    } catch (err: any) {
-        // If 401, DON'T fallback to local data, let the interceptor handle it
-        if (err.response?.status === 401) throw err;
-
-        // If offline or network error, fallback to cache
-        if (table) return await table.toArray();
-        throw err;
     }
+
+    // 2. OFFLINE (or failed Online): Cache-First
+    if (table) {
+        const localData = await table.toArray();
+        if (localData.length > 0) return localData;
+    }
+
+    return isOnline ? [] : []; // Fallback
 }
 
-async function handlePost(endpoint: string, data: any, actionType: any) {
-    if (typeof window !== 'undefined' && !navigator.onLine) {
+async function handlePost(endpoint: string, data: any, actionType: OfflineAction['type']) {
+    const isOnline = typeof window !== 'undefined' && navigator.onLine;
+
+    // ONLINE: try to send directly — only queue on failure
+    if (isOnline) {
+        try {
+            const res = await api.post(endpoint, data);
+            const postResult = res.data;
+
+            // ✅ Async cache refresh — do NOT let this failure affect the POST result
+            if (endpoint.includes('/work-orders/') && endpoint.endsWith('/parts')) {
+                const woId = parseInt(endpoint.split('/work-orders/')[1]);
+                if (!isNaN(woId)) {
+                    // Fire and forget — silently refresh cache in background
+                    (async () => {
+                        try {
+                            const timestamp = Date.now();
+                            const [updatedWO, updatedStock] = await Promise.all([
+                                api.get(`/work-orders/${woId}?t=${timestamp}`),
+                                api.get(`/stock?t=${timestamp}`)
+                            ]);
+                            await db.workOrders.put(updatedWO.data);
+                            // Prune + Put stock
+                            await db.transaction('rw', db.stock, async () => {
+                                const freshData = updatedStock.data;
+                                const freshIds = freshData.map((x: any) => x.id).filter(Boolean);
+                                const allKeys = await db.stock.toCollection().primaryKeys();
+                                const toDelete = allKeys.filter((k: any) => !freshIds.includes(k));
+                                if (toDelete.length > 0) await db.stock.bulkDelete(toDelete);
+                                await db.stock.bulkPut(freshData);
+                            });
+                            console.log('✅ OT & Stock cache refreshed after part addition.');
+                        } catch (cacheErr) {
+                            console.warn('⚠️ Cache refresh failed after ADD_PART (non-blocking):', cacheErr);
+                        }
+                    })();
+                }
+            }
+
+            // ✅ For OT creation: store the full result (with parts) in Dexie
+            if (endpoint === '/work-orders' && actionType === 'CREATE_WORK_ORDER' && postResult?.id) {
+                try {
+                    const timestamp = Date.now();
+                    const freshWO = await api.get(`/work-orders/${postResult.id}?t=${timestamp}`);
+                    await db.workOrders.put(freshWO.data);
+                } catch (e) {
+                    // Non-blocking: PUT the raw result as fallback
+                    try { await db.workOrders.put(postResult); } catch {}
+                }
+            }
+
+            return postResult;
+        } catch (err) {
+            console.warn(`POST failed, queuing ${actionType}...`, err);
+            // Fall through to queue
+        }
+    }
+
+    // OFFLINE or failed: add to sync queue
+    if (typeof window !== 'undefined') {
         await db.syncQueue.add({
             type: actionType,
             endpoint,
@@ -83,12 +151,71 @@ async function handlePost(endpoint: string, data: any, actionType: any) {
             timestamp: Date.now(),
             status: 'pending'
         });
-        
-        // Return a optimistic response
-        return { message: "Action enregistrée en local (Hors ligne)", offline: true, ...data };
     }
-    const res = await api.post(endpoint, data);
-    return res.data;
+    return { ...data, id: Date.now(), offline: true, message: 'Action enregistrée' };
+}
+
+async function handlePatch(endpoint: string, data: any, actionType: OfflineAction['type']) {
+    const isOnline = typeof window !== 'undefined' && navigator.onLine;
+
+    // ONLINE: try to send directly — only queue on failure
+    if (isOnline) {
+        try {
+            const res = await api.patch(endpoint, data);
+            // ✅ Update Dexie cache: PUT the FULL server response (includes parts, steps)
+            if (endpoint.includes('/work-orders/')) {
+                const woId = parseInt(endpoint.split('/work-orders/')[1]);
+                if (!isNaN(woId) && res.data?.id) {
+                    await db.workOrders.put(res.data);
+                }
+            }
+            return res.data;
+        } catch (err) {
+            console.warn(`PATCH failed, queuing ${actionType}...`, err);
+            // Fall through to queue
+        }
+    }
+
+    // OFFLINE or failed: add to sync queue
+    if (typeof window !== 'undefined') {
+        await db.syncQueue.add({
+            type: actionType,
+            endpoint,
+            method: 'PATCH',
+            payload: data,
+            timestamp: Date.now(),
+            status: 'pending'
+        });
+    }
+    return { ...data, offline: true };
+}
+
+async function handleDelete(endpoint: string, actionType: OfflineAction['type']) {
+    const isOnline = typeof window !== 'undefined' && navigator.onLine;
+
+    // ONLINE: try to send directly — only queue on failure
+    if (isOnline) {
+        try {
+            const res = await api.delete(endpoint);
+            return res.data;
+        } catch (err) {
+            console.warn(`DELETE failed, queuing ${actionType}...`, err);
+            // Fall through to queue
+        }
+    }
+
+    // OFFLINE or failed: add to sync queue
+    if (typeof window !== 'undefined') {
+        await db.syncQueue.add({
+            type: actionType,
+            endpoint,
+            method: 'DELETE',
+            payload: {},
+            timestamp: Date.now(),
+            status: 'pending'
+        });
+    }
+    return { offline: true };
 }
 
 // ────────────────────────────────────────────
@@ -98,7 +225,9 @@ async function handlePost(endpoint: string, data: any, actionType: any) {
 async function processSyncQueue() {
     if (typeof window === 'undefined' || !navigator.onLine) return;
     
-    const queue = await db.syncQueue.where('status').equals('pending').toArray();
+    const queue = await db.syncQueue
+        .filter(a => a.status === 'pending' || a.status === 'error')
+        .toArray();
     if (queue.length === 0) return;
 
     for (const action of queue) {
@@ -113,11 +242,16 @@ async function processSyncQueue() {
             await db.syncQueue.delete(action.id!);
             console.log(`Sync Success: ${action.type} -> ${action.endpoint}`);
         } catch (err: any) {
-            console.error(`Sync Failure for ${action.id}:`, err);
-            await db.syncQueue.update(action.id!, { 
-                status: 'error', 
-                errorMessage: err.response?.data?.detail || err.message 
-            });
+            if (err.response?.status === 404) {
+                console.warn(`🗑️ Skipping deleted resource: ${action.endpoint}`);
+                await db.syncQueue.delete(action.id!);
+            } else {
+                console.error(`Sync Failure for ${action.id}:`, err);
+                await db.syncQueue.update(action.id!, { 
+                    status: 'error', 
+                    errorMessage: err.response?.data?.detail || err.message 
+                });
+            }
         }
     }
 }
@@ -133,25 +267,48 @@ if (typeof window !== 'undefined') {
 async function syncMasterData() {
     if (typeof window === 'undefined' || !navigator.onLine) return;
     
-    console.log('🔄 Syncing master data...');
-    try {
-        // Fetch everything in parallel
-        const [machines, stock, technicians, workOrders] = await Promise.all([
-            api.get('/machines'),
-            api.get('/stock'),
-            api.get('/technicians'),
-            api.get('/work-orders')
-        ]);
+    // Skip sync if user is not authenticated
+    const token = localStorage.getItem('token');
+    if (!token) {
+        console.log('⏭️ Skipping master data sync — not authenticated.');
+        return;
+    }
 
-        // Update Dexie tables
-        await Promise.all([
-            db.machines.bulkPut(machines.data),
-            db.stock.bulkPut(stock.data),
-            db.technicians.bulkPut(technicians.data),
-            db.workOrders.bulkPut(workOrders.data)
-        ]);
-        
-        console.log('✅ Master data synced successfully.');
+    console.log('🔄 Syncing master data...');
+    
+    // Fetch each resource independently to prevent one failure from blocking all
+    const [machinesRes, stockRes, techRes, woRes] = await Promise.allSettled([
+        api.get('/machines'),
+        api.get('/stock'),
+        api.get('/technicians'),
+        api.get('/work-orders')
+    ]);
+
+    try {
+        const syncTable = async (table: any, res: any) => {
+            if (res.status === 'fulfilled' && Array.isArray(res.value.data)) {
+                await db.transaction('rw', table, async () => {
+                    const freshData = res.value.data;
+                    const freshIds = freshData.map((x: any) => x.id).filter(Boolean);
+                    const allKeys = await table.toCollection().primaryKeys();
+                    const toDelete = allKeys.filter((k: any) => !freshIds.includes(k));
+                    if (toDelete.length > 0) await table.bulkDelete(toDelete);
+                    await table.bulkPut(freshData);
+                });
+            }
+        };
+
+        await syncTable(db.machines, machinesRes);
+        await syncTable(db.stock, stockRes);
+        await syncTable(db.technicians, techRes);
+        await syncTable(db.workOrders, woRes);
+
+        const failures = [machinesRes, stockRes, techRes, woRes].filter(r => r.status === 'rejected').length;
+        if (failures > 0) {
+            console.warn(`⚠️ Master data sync partial — ${failures}/4 resource(s) failed.`);
+        } else {
+            console.log('✅ Master data synced successfully.');
+        }
     } catch (err) {
         console.error('❌ Master data sync failed:', err);
     }
@@ -185,49 +342,14 @@ export const gmaoApi = {
         return handlePost('/stock/order', { itemId, quantity }, 'UPDATE_WORK_ORDER');
     },
 
-    updateWorkOrder: async (id: number | string, data: any) => {
-        if (typeof window !== 'undefined' && !navigator.onLine) {
-            await db.syncQueue.add({
-                type: 'UPDATE_WORK_ORDER',
-                id: Number(id),
-                endpoint: `/work-orders/${id}`,
-                method: 'PATCH',
-                payload: data,
-                timestamp: Date.now(),
-                status: 'pending'
-            });
-            return { offline: true };
-        }
-        const res = await api.patch(`/work-orders/${id}`, data);
-        return res.data;
-    },
+    updateWorkOrder: (id: number | string, data: any) => handlePatch(`/work-orders/${id}`, data, 'UPDATE_WORK_ORDER'),
+    deleteWorkOrder: (id: number | string) => handleDelete(`/work-orders/${id}`, 'DELETE_WORK_ORDER'),
 
-    deleteWorkOrder: async (id: number | string) => {
-        if (typeof window !== 'undefined' && !navigator.onLine) {
-            await db.syncQueue.add({
-                type: 'DELETE_WORK_ORDER',
-                endpoint: `/work-orders/${id}`,
-                method: 'DELETE',
-                payload: {},
-                timestamp: Date.now(),
-                status: 'pending'
-            });
-            return { offline: true };
-        }
-        const res = await api.delete(`/work-orders/${id}`);
-        return res.data;
-    },
-
-    approveWorkOrderDeletion: (id: number | string) => api.post(`/work-orders/${id}/approve-deletion`),
-    rejectWorkOrderDeletion: (id: number | string) => api.post(`/work-orders/${id}/reject-deletion`),
+    approveWorkOrderDeletion: (id: number | string) => handlePost(`/work-orders/${id}/approve-deletion`, {}, 'APPROVE_DELETION'),
+    rejectWorkOrderDeletion: (id: number | string) => handlePost(`/work-orders/${id}/reject-deletion`, {}, 'REJECT_DELETION'),
 
     getMachineWorkOrders: async (machineId: number) => {
-        // Simple filter on local workOrders if offline
-        if (!navigator.onLine) {
-             return (await db.workOrders.toArray()).filter(wo => wo.equipment_id === machineId);
-        }
-        const res = await api.get(`/machines/${machineId}/work-orders`);
-        return res.data;
+        return handleGet(`/machines/${machineId}/work-orders`, db.workOrders);
     },
 
     addWorkOrderPart: (woId: number | string, data: any) => 
@@ -246,20 +368,18 @@ export const gmaoApi = {
         await syncMasterData();
     },
 
-    toggleStep: async (stepId: number, isDone: boolean) => {
-        if (typeof window !== 'undefined' && !navigator.onLine) {
-            await db.syncQueue.add({
-                type: 'UPDATE_WORK_ORDER',
-                endpoint: `/work-orders/steps/${stepId}/toggle`,
-                method: 'PATCH',
-                payload: { is_done: isDone },
-                timestamp: Date.now(),
-                status: 'pending'
-            });
-            return { offline: true };
-        }
-        const res = await api.patch(`/work-orders/steps/${stepId}/toggle`, { is_done: isDone });
-        return res.data;
+    toggleStep: (stepId: number, isDone: boolean) => 
+        handlePatch(`/work-orders/steps/${stepId}/toggle`, { is_done: isDone }, 'UPDATE_WORK_ORDER'),
+
+    downloadWorkOrderReport: async (woId: number | string) => {
+        const response = await api.get(`/work-orders/${woId}/pdf`, { responseType: 'blob' });
+        const url = window.URL.createObjectURL(new Blob([response.data]));
+        const link = document.createElement('a');
+        link.href = url;
+        link.setAttribute('download', `Rapport_OT_${woId}.pdf`);
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
     },
 
     // MANAGER
@@ -306,36 +426,8 @@ export const gmaoApi = {
         const endpoint = statusFilter ? `/parts-requests?status_filter=${statusFilter}` : '/parts-requests';
         return handleGet(endpoint, db.partsRequests);
     },
-    approvePartsRequest: async (reqId: number) => {
-        if (typeof window !== 'undefined' && !navigator.onLine) {
-            await db.syncQueue.add({
-                type: 'APPROVE_PARTS_REQUEST', 
-                endpoint: `/parts-requests/${reqId}/approve`,
-                method: 'PATCH',
-                payload: {},
-                timestamp: Date.now(),
-                status: 'pending'
-            });
-            return { offline: true };
-        }
-        const res = await api.patch(`/parts-requests/${reqId}/approve`, {});
-        return res.data;
-    },
-    rejectPartsRequest: async (reqId: number, reason: string) => {
-        if (typeof window !== 'undefined' && !navigator.onLine) {
-            await db.syncQueue.add({
-                type: 'REJECT_PARTS_REQUEST', 
-                endpoint: `/parts-requests/${reqId}/reject`,
-                method: 'PATCH',
-                payload: { reason },
-                timestamp: Date.now(),
-                status: 'pending'
-            });
-            return { offline: true };
-        }
-        const res = await api.patch(`/parts-requests/${reqId}/reject`, { reason });
-        return res.data;
-    },
+    approvePartsRequest: (reqId: number) => handlePatch(`/parts-requests/${reqId}/approve`, {}, 'APPROVE_PARTS_REQUEST'),
+    rejectPartsRequest: (reqId: number, reason: string) => handlePatch(`/parts-requests/${reqId}/reject`, { reason }, 'REJECT_PARTS_REQUEST'),
     
     // TIME TRACKING
     getTimerActive: () => handleGet('/technician/timer/active'),
@@ -360,7 +452,9 @@ export const gmaoApi = {
         } catch {
             return null;
         }
-    }
+    },
+    syncMachinesFromSap: () => handlePost('/machines/sync-from-sap', {}, 'SYNC_SAP_MACHINES'),
+    syncWorkOrdersFromSap: () => handlePost('/work-orders/sync-from-sap', {}, 'SYNC_SAP_OTS'),
 };
 
 export default api;

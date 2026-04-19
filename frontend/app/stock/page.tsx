@@ -8,30 +8,24 @@ import { smartSearch } from './_components/smartSearch';
 import SearchBar from './_components/SearchBar';
 import SearchResults from './_components/SearchResults';
 import InventoryTable from './_components/InventoryTable';
+import { useLiveQuery } from 'dexie-react-hooks';
+import { db } from '../../lib/db';
 
 export default function StockPage() {
   const [searchTerm, setSearchTerm] = useState('');
   const [results, setResults] = useState<Array<StockItem & { score: number }>>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [hasSearched, setHasSearched] = useState(false);
-  const [allItems, setAllItems] = useState<StockItem[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
   const [userRole, setUserRole] = useState('');
   const { success, error: toastError } = useToast();
 
-  // ── Fetch stock + role from JWT ──
+  // REACTIVE STOCK FROM DB
+  const rawStock = useLiveQuery(() => db.stock.toArray()) as StockItem[] | undefined;
+  const allItems = rawStock || [];
+  const isLoading = rawStock === undefined;
+
+  // ── Fetch role from JWT ──
   useEffect(() => {
-    const fetchStock = async () => {
-      try {
-        const data = await gmaoApi.getStock();
-        setAllItems(data);
-      } catch (e) {
-        console.error('Failed to fetch stock', e);
-      } finally {
-        setIsLoading(false);
-      }
-    };
-    fetchStock();
 
     if (typeof window !== 'undefined') {
       const token = localStorage.getItem('token');
@@ -71,8 +65,7 @@ export default function StockPage() {
         success('Mode Hors-Ligne', `${item.name} ajouté à la file de synchronisation.`);
       } else {
         success('Commande transmise', `${item.name} — SAP confirmé`);
-        const data = await gmaoApi.getStock();
-        setAllItems(data);
+        await gmaoApi.getStock();
       }
     } catch {
       toastError('Échec de la commande', 'Vérifiez la connexion SAP');

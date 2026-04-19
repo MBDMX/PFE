@@ -14,11 +14,14 @@ import {
   Calendar,
   ArrowUpRight,
   Trash2,
-  X,
   ChevronRight,
-  Loader2
+  Loader2,
+  RefreshCw,
+  X
 } from 'lucide-react';
 import { gmaoApi } from '@/services/api';
+import { useLiveQuery } from 'dexie-react-hooks';
+import { db } from '@/lib/db';
 
 type Priority = 'low' | 'medium' | 'high' | 'critical';
 type WOStatus = 'open' | 'in_progress' | 'done' | 'closed' | 'pending_deletion';
@@ -35,43 +38,59 @@ type WorkOrder = {
 };
 
 export default function WorkOrdersPage() {
-    const [orders, setOrders] = useState<WorkOrder[]>([]);
     const [loading, setLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState('');
     const [statusFilter, setStatusFilter] = useState('all');
     const [isUpdating, setIsUpdating] = useState<number | null>(null);
+    const [isSyncing, setIsSyncing] = useState(false);
+    const [mounted, setMounted] = useState(false);
     const router = useRouter();
 
     const currentUser = gmaoApi.getCurrentUser();
     const isManager = currentUser?.role === 'manager' || currentUser?.role === 'admin';
 
-    const fetchOrders = async () => {
+    // ✅ Reactive: auto-refreshes whenever Dexie workOrders table changes
+    const orders = useLiveQuery(
+        () => db.workOrders.toArray(),
+        [],
+        [] as WorkOrder[]
+    ) as WorkOrder[];
+
+    const fetchWorkOrders = async () => {
         setLoading(true);
         try {
-            const data = await gmaoApi.getWorkOrders();
-            setOrders(data);
-        } catch (err) {
-            console.error("Erreur chargement interventions:", err);
+            await gmaoApi.getWorkOrders();
         } finally {
             setLoading(false);
         }
     };
 
+    // Initial fetch to populate Dexie from server
     useEffect(() => {
-        fetchOrders();
+        setMounted(true);
+        fetchWorkOrders();
     }, []);
+
+    const handleSyncSAP = async () => {
+        setIsSyncing(true);
+        try {
+            const res = await gmaoApi.syncWorkOrdersFromSap();
+            await fetchWorkOrders();
+            window.dispatchEvent(new CustomEvent('api:success', { detail: res.message || 'Synchronisation SAP terminée' }));
+        } catch (err: any) {
+            console.error('SAP Sync failed', err);
+            window.dispatchEvent(new CustomEvent('api:error', { detail: 'Échec de la synchronisation SAP' }));
+        } finally {
+            setIsSyncing(false);
+        }
+    };
 
     const handleDelete = async (order: WorkOrder) => {
         if (!confirm(isManager ? "Supprimer définitivement cet OT ?" : "Demander la suppression de votre OT ?")) return;
         setIsUpdating(order.id);
         try {
-            const res = await gmaoApi.deleteWorkOrder(order.id);
-            if (res.offline || res.status === 'pending_deletion') {
-                // Refresh to show pending status
-                fetchOrders();
-            } else {
-                setOrders(orders.filter(o => o.id !== order.id));
-            }
+            await gmaoApi.deleteWorkOrder(order.id);
+            // useLiveQuery auto-refreshes — no manual fetch needed
         } catch (err) {
             console.error("Delete failed", err);
         } finally {
@@ -112,13 +131,25 @@ export default function WorkOrdersPage() {
                   <h1 className="text-3xl font-black bg-gradient-to-r from-white to-slate-400 bg-clip-text text-transparent tracking-tight">Ordre de travail</h1>
                   <p className="text-sm font-bold text-slate-500 uppercase tracking-widest mt-1">Gestion des Ordres de Travail et Maintenance</p>
                 </div>
-                <button 
-                  onClick={() => router.push('/work-orders/new')}
-                  className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white px-6 py-3 rounded-2xl font-bold shadow-lg shadow-blue-600/20 transition-all hover:scale-105 active:scale-95"
-                >
-                  <Plus size={20} strokeWidth={3} />
-                  <span>Nouvel Ordre de Travail</span>
-                </button>
+                <div className="flex gap-3">
+                    {mounted && isManager && (
+                        <button 
+                            onClick={handleSyncSAP}
+                            disabled={isSyncing}
+                            className="flex items-center gap-2 px-6 py-3 rounded-2xl bg-white/5 hover:bg-white/10 border border-white/5 hover:border-blue-500/30 text-white font-black uppercase text-xs tracking-widest transition-all group disabled:opacity-50"
+                        >
+                            <RefreshCw size={16} className={`${isSyncing ? 'animate-spin' : 'group-hover:rotate-180 transition-transform duration-500'}`} />
+                            {isSyncing ? 'En cours...' : 'Synchroniser SAP'}
+                        </button>
+                    )}
+                    <button 
+                      onClick={() => router.push('/work-orders/new')}
+                      className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white px-6 py-3 rounded-2xl font-bold shadow-lg shadow-blue-600/20 transition-all hover:scale-105 active:scale-95"
+                    >
+                      <Plus size={20} strokeWidth={3} />
+                      <span>Nouvel OT</span>
+                    </button>
+                </div>
             </header>
 
             {/* Quick Stats Banner */}

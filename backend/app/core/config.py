@@ -13,8 +13,16 @@ class Settings(BaseSettings):
     # PostgreSQL via Prisma
     DATABASE_URL: str = "postgresql://gmao_user:gmao_password@localhost:5432/gmao_db"
 
+    # SAP BUSINESS ONE + PROCESSFORCE
+    sap_api_url: str = "https://localhost:54001/api"
+    sap_company_id: str = "BORAPLAST"
+    sap_username: str = "manager"
+    sap_password: str = "manager"
+    sap_client_id: str = "GMAO_APP"
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
+        extra = "allow"
 
 settings = Settings()
