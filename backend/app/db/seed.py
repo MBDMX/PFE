@@ -5,7 +5,7 @@ from app.core.security import get_password_hash
 async def execute_seed_data(db: Prisma):
     user_count = await db.user.count()
     if user_count == 0:
-        print("🌱 Seeding database...")
+        print("Seeding database...")
         # 1. Users
         await db.user.create_many(data=[
             {"username": "admin", "email": "admin@gmao-pro.com", "password_hash": get_password_hash("password"), "role": "admin", "name": "Responsable"},
@@ -85,4 +85,4 @@ async def execute_seed_data(db: Prisma):
             }
         ])
 
-        print("✅ Database seeded successfully.")
+        print("Database seeded successfully.")
