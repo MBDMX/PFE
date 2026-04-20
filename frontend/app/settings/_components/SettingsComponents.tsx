@@ -205,19 +205,56 @@ export function DangerAction({
     );
 }
 
-import { FaceEnroll } from '@/components/FaceEnroll';
+import { FaceEnroll } from '../../../components/FaceEnroll';
 
 // ── Biometry section ───────────────────────────────────────────────────────
 
 export function BiometrySection() {
+    const [isEnrolling, setIsEnrolling] = useState(false);
+
     return (
         <Section 
             icon={<Camera size={16} />} 
-            title="Connexion Biométrique" 
-            subtitle="Gérez l'accès par reconnaissance faciale"
-            accent="border-blue-500"
+            title="Connexion Biométrique (Face ID)" 
+            subtitle="Gérez la sécurité de votre accès facial"
+            accent="border-indigo-500"
         >
-            <FaceEnroll />
+            {!isEnrolling ? (
+                <div className="space-y-4 animate-in fade-in slide-in-from-top-2 duration-300">
+                    <div className="p-4 rounded-2xl bg-indigo-500/5 border border-indigo-500/10 flex items-center gap-4">
+                        <div className="size-12 rounded-full bg-indigo-500/10 flex items-center justify-center text-indigo-400">
+                            <Camera size={24} />
+                        </div>
+                        <div className="flex-1">
+                            <p className="text-xs font-black text-white">Scanner facial 360°</p>
+                            <p className="text-[0.65rem] font-bold text-slate-500 uppercase tracking-widest mt-1">
+                                Utilisez votre visage pour vous connecter instantanément
+                            </p>
+                        </div>
+                    </div>
+                    
+                    <button
+                        onClick={() => setIsEnrolling(true)}
+                        className="w-full py-4 rounded-2xl bg-indigo-600 hover:bg-indigo-500 text-white text-[0.65rem] font-black uppercase tracking-widest transition-all shadow-lg shadow-indigo-500/20 active:scale-95"
+                    >
+                        Configurer / Mettre à jour mon profil facial
+                    </button>
+                    
+                    <p className="text-[0.6rem] text-center text-slate-600 font-medium">
+                        Vos données faciales sont transformées en vecteurs mathématiques cryptés et ne sortent jamais du serveur sécurisé.
+                    </p>
+                </div>
+            ) : (
+                <div className="animate-in zoom-in-95 duration-500 relative">
+                    <button 
+                        onClick={() => setIsEnrolling(false)}
+                        className="absolute top-2 right-2 z-[100] px-3 py-1.5 rounded-lg bg-rose-500 text-white text-[0.6rem] font-black uppercase tracking-widest hover:bg-rose-600 transition-all"
+                    >
+                        Annuler
+                    </button>
+                    <FaceEnroll />
+                </div>
+            )}
         </Section>
     );
 }

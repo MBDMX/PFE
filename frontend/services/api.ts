@@ -1,9 +1,7 @@
 import axios from 'axios';
 import { db, type OfflineAction } from '../lib/db';
 
-const apiBaseUrl = typeof window !== 'undefined'
-    ? `http://${window.location.hostname}:5000/api`
-    : 'http://localhost:5000/api';
+const apiBaseUrl = 'http://127.0.0.1:5000/api';
 
 const api = axios.create({ baseURL: process.env.NEXT_PUBLIC_API_URL || apiBaseUrl });
 

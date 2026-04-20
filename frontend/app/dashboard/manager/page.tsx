@@ -26,7 +26,11 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../../../lib/db';
 
 export default function ManagerDashboard() {
+    const [mounted, setMounted] = useState(false);
+    useEffect(() => { setMounted(true); }, []);
+
     const user = typeof window !== 'undefined' ? getUser() : { name: '', sub: '' };
+    const displayName = mounted ? (user.name || user.sub || 'Responsable') : 'Responsable';
 
     // ✅ REACTIVE: Real-time queries on local cache
     const wos = useLiveQuery(() => db.workOrders.toArray()) || [];
@@ -69,7 +73,6 @@ export default function ManagerDashboard() {
         lowStock: stockItems.filter(i => (i.quantity || 0) <= 5).length,
     } : null;
 
-    const displayName = user.name || user.sub || 'Responsable';
 
     return (
         <div className="animate-in fade-in slide-in-from-bottom-4 duration-700 space-y-8 pb-10">

@@ -197,12 +197,12 @@ export default function LoginPage() {
             </div>
 
             <FaceLogin 
-              onSuccess={(data) => {
-                localStorage.setItem('token', data.access_token);
-                if (data.refresh_token) localStorage.setItem('refresh_token', data.refresh_token);
-                localStorage.setItem('user', JSON.stringify(data.user));
-                const route = ROLE_ROUTES[data.user.role];
-                if (route) router.replace(route);
+              onSuccess={(user) => {
+                // FaceLogin already stores access_token + user in localStorage
+                // Force full page reload so auth context re-reads localStorage
+                const role = user?.role ?? JSON.parse(localStorage.getItem('user') || '{}').role;
+                const route = ROLE_ROUTES[role] ?? '/dashboard';
+                window.location.href = route;
               }}
             />
           </div>
