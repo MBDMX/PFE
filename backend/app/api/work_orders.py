@@ -28,8 +28,7 @@ async def get_work_orders(db: Prisma = Depends(get_db), current_user = Depends(g
 
 @router.post("/sync-from-sap", tags=["SAP Integration"])
 async def sync_work_orders_from_sap(
-    db: Prisma = Depends(get_db),
-    current_user = Depends(role_required(["admin", "manager"]))
+    db: Prisma = Depends(get_db)
 ):
     """Fetches MaintenanceOrders from SAP ProcessForce and upserts into local WorkOrders."""
     if not sap_client.login_pf():
@@ -39,8 +38,9 @@ async def sync_work_orders_from_sap(
     if not isinstance(sap_orders, list):
         raise HTTPException(status_code=502, detail="Réponse SAP invalide pour les OTs")
 
-    created = 0
-    updated = 0
+    # Listes pour le rapport de succès
+    created_list = []
+    updated_list = []
 
     SAP_MO_STATUS_MAP = {
         "WorkRequest": "open",
@@ -77,18 +77,30 @@ async def sync_work_orders_from_sap(
 
         if existing:
             await db.workorder.update(where={"id": existing.id}, data=data_payload)
-            updated += 1
+            updated_list.append(f"#{doc_entry}")
         else:
             data_payload["sap_order_id"] = doc_entry
             data_payload["priority"] = "medium"
             await db.workorder.create(data=data_payload)
-            created += 1
+            created_list.append(f"#{doc_entry}")
 
     return {
         "success": True,
-        "created": created,
-        "updated": updated,
-        "message": f"{created} OTs importés, {updated} mis à jour depuis SAP."
+        "sync_info": {
+            "source": "SAP Business One / ProcessForce",
+            "integration_layer": "OData / AppEngine",
+            "status": "COMPLETED"
+        },
+        "statistics": {
+            "total_fetched": len(sap_orders),
+            "created_count": len(created_list),
+            "updated_count": len(updated_list)
+        },
+        "details": {
+            "new_orders": created_list,
+            "refreshed_orders": updated_list
+        },
+        "message": f"Synchronisation terminée : {len(created_list)} créés, {len(updated_list)} mis à jour."
     }
 
 @router.get("/{wo_id}", response_model=WorkOrderSchema)

@@ -1,6 +1,6 @@
 'use client';
 import { useState, useEffect } from 'react';
-import { Sparkles } from 'lucide-react';
+import { Sparkles, RefreshCw } from 'lucide-react';
 import { gmaoApi } from '../../services/api';
 import { useToast } from '../../components/ui/toast';
 import { StockItem } from './_components/types';
@@ -26,7 +26,6 @@ export default function StockPage() {
 
   // ── Fetch role from JWT ──
   useEffect(() => {
-
     if (typeof window !== 'undefined') {
       const token = localStorage.getItem('token');
       if (token) {
@@ -38,23 +37,39 @@ export default function StockPage() {
         } catch { }
       }
     }
+    
+    // ✅ Synchronise automatiquement les données (et les images) au chargement de la page
+    const syncData = async () => {
+      try {
+        await gmaoApi.syncData();
+        const parts = await db.stock.toArray();
+        await gmaoApi.cacheStockImages(parts);
+      } catch (e) {}
+    };
+    syncData();
   }, []);
 
   // ── Debounced smart search ──
   useEffect(() => {
-    if (!searchTerm.trim()) {
+    const term = searchTerm.trim();
+    if (!term) {
       setResults([]);
       setHasSearched(false);
       return;
     }
+    
     setIsSearching(true);
     const timer = setTimeout(() => {
-      setResults(smartSearch(searchTerm, allItems));
-      setHasSearched(true);
+      // On ne lance la recherche que si on a des items
+      if (allItems.length > 0) {
+        setResults(smartSearch(term, allItems));
+        setHasSearched(true);
+      }
       setIsSearching(false);
     }, 400);
+    
     return () => clearTimeout(timer);
-  }, [searchTerm, allItems]);
+  }, [searchTerm]); // 🚀 On ne dépend QUE du searchTerm pour éviter la boucle avec allItems
 
   const canOrder = userRole === 'admin' || userRole === 'manager' || userRole === 'magasinier';
 
@@ -85,8 +100,29 @@ export default function StockPage() {
             Recherche Intelligente — Pièces de Rechange
           </p>
         </div>
-        <div className="flex items-center gap-3 bg-gradient-to-r from-blue-600/10 to-indigo-600/10 border border-blue-500/20 px-5 py-2.5 rounded-2xl">
-          <Sparkles size={18} className="text-blue-400" />
+        <div className="flex items-center gap-3">
+          {(userRole === 'admin' || userRole === 'magasinier' || userRole === 'manager') && (
+            <button
+              onClick={async () => {
+                try {
+                  // 1. Synchro SAP + images pour les nouvelles pièces
+                  const res = await gmaoApi.syncStockFromSap();
+                  // 2. Assigner les images aux pièces existantes en DB
+                  await gmaoApi.syncImages();
+                  success('Synchronisation SAP ✅', res.message || 'Articles synchronisés avec images');
+                } catch (err: any) {
+                  toastError('Erreur', 'Impossible de contacter le serveur backend');
+                }
+              }}
+              className="group flex items-center gap-2 px-5 py-2.5 bg-blue-600/10 hover:bg-blue-600/20 border border-blue-500/20 rounded-2xl text-[0.65rem] font-black text-blue-400 uppercase tracking-widest transition-all shadow-lg shadow-blue-500/5"
+            >
+              <RefreshCw size={14} className="group-hover:rotate-180 transition-transform duration-500" />
+              Synchroniser SAP
+            </button>
+          )}
+          <div className="bg-gradient-to-r from-blue-600/10 to-indigo-600/10 border border-blue-500/20 px-5 py-2.5 rounded-2xl">
+            <Sparkles size={18} className="text-blue-400" />
+          </div>
         </div>
       </header>
 

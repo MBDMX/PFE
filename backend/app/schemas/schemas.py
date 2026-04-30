@@ -43,7 +43,13 @@ class Machine(MachineBase):
     model_config = ConfigDict(from_attributes=True)
 
 class StockBase(BaseModel):
-    name: str; reference: str; quantity: int; unit: str; location: str; image: Optional[str] = None; synonyms: Optional[str] = None
+    name: Optional[str] = None
+    reference: Optional[str] = None
+    quantity: Optional[int] = 0
+    unit: Optional[str] = None
+    location: Optional[str] = None
+    image: Optional[str] = None
+    synonyms: Optional[str] = None
     unit_price: Optional[float] = 0.0
 
 class Stock(StockBase):

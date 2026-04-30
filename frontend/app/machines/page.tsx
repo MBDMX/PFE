@@ -25,6 +25,7 @@ import {
     CalendarClock,
     Zap,
     RefreshCw,
+    Brain,
 } from 'lucide-react';
 import api, { gmaoApi } from '@/services/api';
 
@@ -113,8 +114,26 @@ export default function MachinesPage() {
     const fetchMachines = async () => {
         setLoading(true);
         try {
-            const data = await gmaoApi.getMachines();
-            setMachines(data);
+            // Fetch machines and ML scores in parallel
+            const [data, mlRes] = await Promise.all([
+                gmaoApi.getMachines(),
+                api.get('/predictive/machine-health').catch(() => ({ data: { data: [] } }))
+            ]);
+            
+            const mlScores = mlRes.data?.data || [];
+            
+            // Merge ML scores into machines
+            const enrichedMachines = data.map((m: Machine) => {
+                const mlData = mlScores.find((s: any) => s.id === m.id);
+                return {
+                    ...m,
+                    ml_score: mlData?.score,
+                    ml_risk: mlData?.risk,
+                    ml_reasons: mlData?.reasons || []
+                };
+            });
+
+            setMachines(enrichedMachines);
         } catch (err) {
             console.error("Erreur chargement machines:", err);
         } finally {
@@ -229,8 +248,8 @@ export default function MachinesPage() {
                                 const status = getStatusInfo(m.status);
                                 return (
                                     <tr key={m.id}
-                                        onClick={() => handleSelectMachine(m)}
-                                        className={`group transition-all cursor-pointer ${selectedMachine?.id === m.id ? 'bg-blue-600/10 border-blue-500/20' : 'hover:bg-white/5'}`}
+                                        onClick={() => router.push(`/machines/${m.id}`)}
+                                        className="group transition-all cursor-pointer hover:bg-white/5 border-b border-white/5 last:border-0"
                                     >
                                         <td>
                                             <div className="flex items-center gap-4">
@@ -269,15 +288,18 @@ export default function MachinesPage() {
                                         <td>
                                             <div className="flex flex-col gap-2 w-32">
                                                 <div className="flex items-center justify-between">
-                                                    <span className={`text-[0.65rem] font-black uppercase tracking-widest ${m.health_score > 50 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                                                        {m.health_score}%
-                                                    </span>
-                                                    {m.health_score > 80 ? <TrendingUp size={10} className="text-emerald-500" /> : <TrendingDown size={10} className="text-rose-500" />}
+                                                    <div className="flex items-center gap-1.5">
+                                                        <span className={`text-[0.65rem] font-black uppercase tracking-widest ${(m as any).ml_score ? ((m as any).ml_score > 50 ? 'text-emerald-400' : 'text-rose-400') : (m.health_score > 50 ? 'text-emerald-400' : 'text-rose-400')}`}>
+                                                            {(m as any).ml_score ?? m.health_score}%
+                                                        </span>
+                                                        <span className="text-[0.5rem] bg-blue-500/20 text-blue-400 px-1 rounded font-black border border-blue-500/20">ML</span>
+                                                    </div>
+                                                    {((m as any).ml_score ?? m.health_score) > 80 ? <TrendingUp size={10} className="text-emerald-500" /> : <TrendingDown size={10} className="text-rose-500" />}
                                                 </div>
                                                 <div className="h-1.5 w-full bg-white/5 rounded-full overflow-hidden">
                                                     <div
-                                                        className={`h-full bg-gradient-to-r ${getHealthColor(m.health_score)} rounded-full transition-all duration-1000`}
-                                                        style={{ width: `${m.health_score}%` }}
+                                                        className={`h-full bg-gradient-to-r ${getHealthColor((m as any).ml_score ?? m.health_score)} rounded-full transition-all duration-1000`}
+                                                        style={{ width: `${(m as any).ml_score ?? m.health_score}%` }}
                                                     />
                                                 </div>
                                             </div>
@@ -342,6 +364,35 @@ export default function MachinesPage() {
                             <div className="azure-card p-4 flex flex-col items-center justify-center text-center gap-1 bg-emerald-500/5">
                                 <div className="text-2xl font-black text-white">{machineOrders.filter(o => o.status === 'done').length}</div>
                                 <div className="text-[0.55rem] font-bold text-slate-500 uppercase tracking-widest">Réussies</div>
+                            </div>
+                        </div>
+
+                        {/* IA Explanation Section */}
+                        <div className="azure-card p-5 bg-blue-600/5 border-blue-500/20 relative overflow-hidden group">
+                            <Brain className="absolute -right-2 -top-2 size-16 text-blue-500/5 -rotate-12" />
+                            <div className="flex items-center gap-2 mb-4 relative z-10">
+                                <Brain size={16} className="text-blue-400" />
+                                <span className="text-[0.7rem] font-black text-white uppercase tracking-widest">Analyse de l'IA</span>
+                            </div>
+                            
+                            <div className="space-y-2 relative z-10">
+                                {(selectedMachine as any).ml_reasons?.length > 0 ? (
+                                    (selectedMachine as any).ml_reasons.map((reason: string, i: number) => (
+                                        <div key={i} className="flex items-start gap-2 text-[0.65rem] font-bold text-slate-400">
+                                            <div className="mt-1 size-1.5 rounded-full bg-blue-500 shadow-[0_0_5px_rgba(59,130,246,0.5)]" />
+                                            <span>{reason}</span>
+                                        </div>
+                                    ))
+                                ) : (
+                                    <p className="text-[0.65rem] text-slate-500 italic">Aucune donnée d'analyse disponible.</p>
+                                )}
+                            </div>
+                            
+                            <div className="mt-4 pt-4 border-t border-white/5 flex items-center justify-between relative z-10">
+                                <span className="text-[0.6rem] font-black text-slate-500 uppercase">Indice de Fiabilité</span>
+                                <span className={`text-xs font-black ${(selectedMachine as any).ml_score > 70 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                    {(selectedMachine as any).ml_score || selectedMachine.health_score}%
+                                </span>
                             </div>
                         </div>
 

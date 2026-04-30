@@ -28,8 +28,7 @@ SAP_STATUS_MAP = {
 
 @router.post("/sync-from-sap", tags=["SAP Integration"])
 async def sync_machines_from_sap(
-    db: Prisma = Depends(get_db),
-    current_user = Depends(role_required(["admin", "manager"]))
+    db: Prisma = Depends(get_db)
 ):
     """
     Fetches all MaintainableItems from SAP ProcessForce (CompuTec AppEngine)

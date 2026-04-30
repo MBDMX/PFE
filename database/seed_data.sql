@@ -82,7 +82,7 @@ INSERT INTO "Machine" (id, name, reference, location, status, health_score, last
 -- STOCK (PIECES)
 -- ================================================================
 TRUNCATE TABLE "stock_items" CASCADE;
-INSERT INTO "stock_items" (id, name, reference, quantity, unit, location, image, synonyms, unit_price) VALUES (2, 'Chauffage cristalisateur', 'EX0201PRE0102', 0, 'Unité', 'Location', NULL, NULL, 0.0);
+INSERT INTO "stock_items" (id, name, reference, quantity, unit, location, image, synonyms, unit_price) VALUES (2, 'Chauffage cristalisateur', 'EX0201PRE0102', 10, 'Unité', 'Location', NULL, NULL, 0.0);
 INSERT INTO "stock_items" (id, name, reference, quantity, unit, location, image, synonyms, unit_price) VALUES (3, 'Turbo d''air chaud', 'EX0201PRE010201', 0, 'Unité', 'Location', NULL, NULL, 0.0);
 INSERT INTO "stock_items" (id, name, reference, quantity, unit, location, image, synonyms, unit_price) VALUES (4, 'Résistances chauffage', 'EX0201PRE010202', 0, 'Unité', 'Location', NULL, NULL, 0.0);
 INSERT INTO "stock_items" (id, name, reference, quantity, unit, location, image, synonyms, unit_price) VALUES (5, 'Sonde température', 'EX0201PRE010203', 0, 'Unité', 'Location', NULL, NULL, 0.0);
@@ -236,7 +236,7 @@ INSERT INTO "stock_items" (id, name, reference, quantity, unit, location, image,
 INSERT INTO "stock_items" (id, name, reference, quantity, unit, location, image, synonyms, unit_price) VALUES (161, 'Pompe', 'EX0208SIL0201', 0, 'Unité', 'Location', NULL, NULL, 0.0);
 INSERT INTO "stock_items" (id, name, reference, quantity, unit, location, image, synonyms, unit_price) VALUES (162, 'Tuyaux', 'EX0208SIL0202', 0, 'Unité', 'Location', NULL, NULL, 0.0);
 INSERT INTO "stock_items" (id, name, reference, quantity, unit, location, image, synonyms, unit_price) VALUES (163, 'Rouleaux', 'EX0208SIL0301', 0, 'Unité', 'Location', NULL, NULL, 0.0);
-INSERT INTO "stock_items" (id, name, reference, quantity, unit, location, image, synonyms, unit_price) VALUES (1, 'Cuve cristalisateur', 'EX0201PRE0101', 0, 'Unité', 'Location', NULL, NULL, 0.0);
+INSERT INTO "stock_items" (id, name, reference, quantity, unit, location, image, synonyms, unit_price) VALUES (1, 'Cuve cristalisateur', 'EX0201PRE0101', 3, 'Unité', 'Location', NULL, NULL, 0.0);
 INSERT INTO "stock_items" (id, name, reference, quantity, unit, location, image, synonyms, unit_price) VALUES (27, 'Vidange matière', 'EX0201PRE0203', 0, 'Unité', 'Location', NULL, NULL, 0.0);
 INSERT INTO "stock_items" (id, name, reference, quantity, unit, location, image, synonyms, unit_price) VALUES (52, 'Résistances zone 1', 'EX0202EDV020201', 0, 'Unité', 'Location', NULL, NULL, 0.0);
 INSERT INTO "stock_items" (id, name, reference, quantity, unit, location, image, synonyms, unit_price) VALUES (79, 'Engrenages', 'EX0202EDV030201', 0, 'Unité', 'Location', NULL, NULL, 0.0);

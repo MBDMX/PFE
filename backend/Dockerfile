@@ -3,17 +3,20 @@ FROM python:3.11-slim
 WORKDIR /app
 
 # Install system dependencies for Prisma
-RUN apt-get update && apt-get install -y openssl && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y openssl curl && \
+    curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
+    apt-get install -y nodejs && \
+    rm -rf /var/lib/apt/lists/*
 
 # Install dependencies
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --default-timeout=100 --no-cache-dir -r requirements.txt
 
 # Copy source code
 COPY . .
 
 # Generate Prisma Client
-RUN prisma generate
+RUN python -m prisma generate
 
 # Expose the API port
 EXPOSE 5000

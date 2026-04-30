@@ -3,15 +3,21 @@ import { useState, useEffect } from 'react';
 import { Clock, User, ArrowRight, Eye } from 'lucide-react';
 import { gmaoApi } from '../../../../services/api';
 
-export default function PendingRequests() {
-    const [requests, setRequests] = useState<any[]>([]);
-    const [loading, setLoading] = useState(true);
+export default function PendingRequests({ requests: propRequests }: { requests?: any[] }) {
+    const [apiRequests, setApiRequests] = useState<any[]>([]);
+    const [loading, setLoading] = useState(!propRequests);
+
+    const displayRequests = (propRequests || apiRequests).slice(0, 4);
 
     useEffect(() => {
+        if (propRequests) {
+            setLoading(false);
+            return;
+        }
         const fetchRequests = async () => {
             try {
                 const data = await gmaoApi.getPartsRequests('pending');
-                setRequests(data.slice(0, 4));
+                setApiRequests(data.slice(0, 4));
             } catch (err) {
                 console.error("Failed to fetch pending requests", err);
             } finally {
@@ -31,12 +37,12 @@ export default function PendingRequests() {
                     <h2 className="text-sm font-black text-white uppercase tracking-widest">Demandes en Attente</h2>
                 </div>
                 <div className="size-6 rounded-full bg-amber-500/10 flex items-center justify-center">
-                    <span className="text-[0.6rem] font-black text-amber-400">{requests.length}</span>
+                    <span className="text-[0.6rem] font-black text-amber-400">{displayRequests.length}</span>
                 </div>
             </div>
 
             <div className="space-y-4 flex-1">
-                {requests.length === 0 ? (
+                {displayRequests.length === 0 ? (
                     <div className="h-full flex flex-col items-center justify-center text-slate-600 italic text-xs gap-3 py-10">
                         <div className="size-12 rounded-full border border-dashed border-white/10 flex items-center justify-center">
                              <Clock size={18} className="opacity-20" />
@@ -44,7 +50,7 @@ export default function PendingRequests() {
                         Aucune demande en attente
                     </div>
                 ) : (
-                    requests.map((req) => (
+                    displayRequests.map((req) => (
                         <div key={req.id} className="group relative">
                             <div className="absolute inset-0 bg-blue-500/5 opacity-0 group-hover:opacity-100 rounded-xl transition-opacity" />
                             <div className="relative p-4 rounded-xl border border-white/5 flex items-start justify-between gap-4">
@@ -73,7 +79,7 @@ export default function PendingRequests() {
                 )}
             </div>
 
-            {requests.length > 0 && (
+            {displayRequests.length > 0 && (
                 <button className="mt-6 w-full py-2 flex items-center justify-center gap-2 text-[0.6rem] font-black uppercase tracking-widest text-slate-500 hover:text-white transition-colors group">
                     Gérer toutes les demandes
                     <ArrowRight size={12} className="group-hover:translate-x-1 transition-transform" />

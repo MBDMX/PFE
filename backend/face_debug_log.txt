@@ -1086,3 +1086,17 @@ fastapi.exceptions.HTTPException: 401: Visage non reconnu
 [FACE LOGIN] Compare resp1: dist=0.6029
 [FACE LOGIN] Compare tech_meca: dist=0.5755
 [FACE LOGIN] MATCH FOUND: tech_meca (dist=0.5755)
+[FACE LOGIN] Request received
+[FACE LOGIN] Fetched 10 users from DB
+[FACE LOGIN] 2 user(s) have a face profile
+[FACE LOGIN] Compare resp1: dist=0.5303
+[FACE LOGIN] Compare tech_meca: dist=0.4746
+[FACE LOGIN] MATCH FOUND: tech_meca (dist=0.4746)
+[FACE LOGIN] Request received
+[FACE LOGIN] Fetched 10 users from DB
+[FACE LOGIN] 2 user(s) have a face profile
+[FACE LOGIN] Compare resp1: dist=0.4857
+[FACE LOGIN] Compare tech_meca: dist=0.5311
+[FACE LOGIN] MATCH FOUND: resp1 (dist=0.4857)
+[DESCRIPTORS] Served 2 profile(s)
+[DESCRIPTORS] Served 2 profile(s)

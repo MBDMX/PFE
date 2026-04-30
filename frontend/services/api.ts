@@ -301,6 +301,11 @@ async function syncMasterData() {
         await syncTable(db.technicians, techRes);
         await syncTable(db.workOrders, woRes);
 
+        // ✅ Désactivé car SmartPartImage gère désormais le cache de manière plus efficace (Lazy Loading)
+        // if (stockRes.status === 'fulfilled') {
+        //     cacheStockImages(stockRes.value.data).catch(() => {});
+        // }
+
         const failures = [machinesRes, stockRes, techRes, woRes].filter(r => r.status === 'rejected').length;
         if (failures > 0) {
             console.warn(`⚠️ Master data sync partial — ${failures}/4 resource(s) failed.`);
@@ -312,6 +317,44 @@ async function syncMasterData() {
     }
 }
 
+/**
+ * Persists images in IndexedDB as base64 for "instant" offline loading.
+ */
+async function cacheStockImages(items: any[]) {
+    if (!Array.isArray(items)) return;
+    
+    console.log('🖼️ Starting background image caching...');
+    
+    for (const item of items) {
+        if (!item.image || item.image.startsWith('http')) continue;
+
+        // Check if already cached to avoid redundant work
+        const local = await db.stock.get(item.id);
+        if (local && local.cached_image) continue;
+
+        try {
+            const imageUrl = item.image.startsWith('http') 
+                ? item.image 
+                : `${process.env.NEXT_PUBLIC_API_URL || apiBaseUrl.replace('/api', '')}${item.image}`;
+            
+            // Fetch image as blob
+            const response = await fetch(imageUrl);
+            const blob = await response.blob();
+            
+            // Convert to Base64
+            const reader = new FileReader();
+            reader.readAsDataURL(blob);
+            reader.onloadend = async () => {
+                const base64data = reader.result;
+                await db.stock.update(item.id, { cached_image: base64data });
+            };
+        } catch (err) {
+            // Silently fail for individual images
+        }
+    }
+    console.log('✅ Background image caching complete.');
+}
+
 // ────────────────────────────────────────────
 // GMAO API EXPORTS
 // ────────────────────────────────────────────
@@ -319,6 +362,19 @@ async function syncMasterData() {
 export const gmaoApi = {
     getMachines: () => handleGet('/machines', db.machines),
     getStock: () => handleGet('/stock', db.stock),
+    syncStockFromSap: async () => {
+        // Appel direct — pas de queue offline pour les syncs SAP
+        const res = await api.post('/stock/sync-from-sap', {});
+        // Rafraîchir immédiatement le cache Dexie avec les nouvelles images
+        await handleGet('/stock', db.stock);
+        return res.data;
+    },
+    syncImages: async () => {
+        // Force l'assignation d'images sur toutes les pièces existantes
+        const res = await api.post('/stock/sync-images', {});
+        await handleGet('/stock', db.stock);
+        return res.data;
+    },
     getWorkOrders: () => handleGet('/work-orders', db.workOrders),
     getStats: () => handleGet('/stats'),
     
@@ -433,6 +489,11 @@ export const gmaoApi = {
     },
     approvePartsRequest: (reqId: number) => handlePatch(`/parts-requests/${reqId}/approve`, {}, 'APPROVE_PARTS_REQUEST'),
     rejectPartsRequest: (reqId: number, reason: string) => handlePatch(`/parts-requests/${reqId}/reject`, { reason }, 'REJECT_PARTS_REQUEST'),
+    
+    searchStockAI: async (query: string) => {
+        const res = await api.post('/stock/search-ai', { query });
+        return res.data;
+    },
     
     // BIOMETRIC AUTH
     enrollFace: (descriptor: number[]) => api.post('/face/enroll', { descriptor }),
