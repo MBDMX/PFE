@@ -3,15 +3,173 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException
 from prisma import Prisma
 from app.db.session import get_db
+from app.sap.client import sap_client
 from app.api.deps import role_required, get_current_user
 from app.schemas.schemas import Stock as StockSchema, PartsRequestOut, StockMovement as StockMovementSchema
 from app.core.websocket import manager
+from app.core.ai_search import perform_smart_search
+from app.core.image_service import get_image_url_for_part
 
-router = APIRouter(prefix="/stock", tags=["stock"])
+router = APIRouter(tags=["stock-pro"])
+
+@router.get("/debug")
+async def debug_stock_images(db: Prisma = Depends(get_db)):
+    """Endpoint de diagnostic : retourne les 10 premières pièces avec leur champ image."""
+    items = await db.stock.find_many(take=10, order={"id": "asc"})
+    return [
+        {
+            "id": it.id,
+            "name": it.name,
+            "reference": it.reference,
+            "image": it.image,
+            "has_image": bool(it.image)
+        }
+        for it in items
+    ]
+
+@router.post("/order")
+async def order_stock(data: dict, db: Prisma = Depends(get_db)):
+    """Simule une commande d'achat dans SAP pour un article."""
+    qty = data.get("quantity", 1)
+    return {"status": "success", "message": f"Commande de {qty} unité(s) transmise à SAP"}
+
+@router.post("/sync-images")
+async def sync_stock_images(db: Prisma = Depends(get_db)):
+    """Assigne les images à TOUTES les pièces du stock (synchrone)."""
+    all_parts = await db.stock.find_many()
+    updated = 0
+    for part in all_parts:
+        img = get_image_url_for_part(part.name or "")
+        await db.stock.update(where={"id": part.id}, data={"image": img})
+        updated += 1
+        print(f"📸 {part.name} → {img[:60]}")
+    return {"status": "success", "updated": updated, "message": f"{updated} images assignées."}
+
+@router.post("/sync-from-sap")
+async def sync_stock_from_sap(db: Prisma = Depends(get_db)):
+    """Importe les articles SAP et assigne les images IMMÉDIATEMENT (synchrone)."""
+    items = []
+    source = "SAP"
+    try:
+        # On tente le login SAP
+        if sap_client.login_sl():
+            items = sap_client.get_items(top=50)
+        else:
+            print("⚠️ SAP injoignable (login failed), passage rapide en mode DEMO.")
+    except Exception as e:
+        print(f"⚠️ SAP hors-ligne, mode DEMO : {e}")
+
+    if not items:
+        source = "DEMO"
+        items = [
+            {"ItemCode": "MOT-001", "ItemName": "Moteur Électrique Triphasé", "SalesUnitHeight": 1250.0},
+            {"ItemCode": "PMP-HYD", "ItemName": "Pompe Hydraulique Haute Pression", "SalesUnitHeight": 850.0},
+            {"ItemCode": "VRN-50",  "ItemName": "Vérin Pneumatique Double Effet",    "SalesUnitHeight": 420.0},
+            {"ItemCode": "JNT-TOR", "ItemName": "Joint Torique Haute Température",   "SalesUnitHeight": 15.0},
+            {"ItemCode": "VSS-M8",  "ItemName": "Vis à Métaux M8 Inox",              "SalesUnitHeight": 2.5},
+            {"ItemCode": "BRM-IND", "ItemName": "Roulement à Billes Industriel",     "SalesUnitHeight": 120.0},
+            {"ItemCode": "CUV-001", "ItemName": "Cuve Cristalisateur Inox",          "SalesUnitHeight": 3500.0},
+        ]
+
+    count = 0
+    try:
+        from app.core.image_service import get_image_url_for_part
+        for it in items:
+            ref = it.get("ItemCode")
+            if not ref:
+                continue
+            name = it.get("ItemName", "Article")
+            try:
+                price = float(it.get("SalesUnitHeight") or 0.0)
+            except:
+                price = 0.0
+
+            # Assigner l'image immédiatement à la création
+            image_url = get_image_url_for_part(name)
+
+            await db.stock.upsert(
+                where={"reference": ref},
+                data={
+                    "create": {
+                        "reference": ref,
+                        "name": name,
+                        "quantity": 15,
+                        "unit_price": price,
+                        "image": image_url,
+                    },
+                    "update": {
+                        "name": name,
+                        "unit_price": price,
+                        "image": image_url,
+                    }
+                }
+            )
+            count += 1
+            print(f"✅ [{source}] {name} → image={image_url[:50]}...")
+
+        # Mettre à jour TOUTES les pièces existantes (pour réparer les anciennes images)
+        print("🔄 Assignation/Réparation des images de toutes les pièces...")
+        existing = await db.stock.find_many()
+        for part in existing:
+            img = get_image_url_for_part(part.name or "")
+            await db.stock.update(where={"id": part.id}, data={"image": img})
+            print(f"  📸 {part.name} → {img[:50]}...")
+
+        return {
+            "status": "success",
+            "source": source,
+            "message": f"{count} articles synchronisés avec images."
+        }
+    except Exception as e:
+        print(f"❌ Erreur sync : {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 @router.get("", response_model=List[StockSchema])
 async def get_stock(db: Prisma = Depends(get_db)):
-    return await db.stock.find_many()
+    items = await db.stock.find_many()
+    # On s'assure que les liens locaux sont complets pour le frontend
+    for item in items:
+        if item.image and item.image.startswith("/static/"):
+            item.image = f"http://localhost:5000{item.image}"
+    return items
+
+@router.post("/{part_id}/ensure-image")
+async def ensure_part_image(part_id: int, force: bool = False, db: Prisma = Depends(get_db)):
+    """Déclenche le téléchargement d'une image si elle manque."""
+    part = await db.stock.find_unique(where={"id": part_id})
+    if not part:
+        raise HTTPException(status_code=404, detail="Pièce non trouvée")
+    
+    # On force la génération/téléchargement asynchrone
+    from app.core.image_service import get_image_url_for_part
+    new_path = await get_image_url_for_part(part.name or "", str(part_id), force)
+    
+    if new_path:
+        await db.stock.update(where={"id": part_id}, data={"image": new_path})
+        full_url = f"http://localhost:5000{new_path}" if new_path.startswith("/static/") else new_path
+        return {"status": "success", "image": full_url}
+    
+    return {"status": "error", "message": "Échec du téléchargement"}
+
+@router.post("/search-ai")
+async def search_stock_ai(data: dict, db: Prisma = Depends(get_db)):
+    query = data.get("query", "")
+    if not query:
+        return []
+    
+    all_items = await db.stock.find_many()
+    results = perform_smart_search(query, all_items)
+    
+    # Transformation pour le format attendu par le frontend
+    return [
+        {
+            **r["item"].dict(),
+            "search_score": r["score"],
+            "search_reason": r["reason"]
+        }
+        for r in results
+    ]
 
 @router.get("/movements", response_model=List[StockMovementSchema])
 async def get_stock_movements(db: Prisma = Depends(get_db)):

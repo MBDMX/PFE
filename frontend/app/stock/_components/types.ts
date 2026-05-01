@@ -9,6 +9,7 @@ export interface StockItem {
   unit: string;
   location: string;
   image?: string;
+  cached_image?: string;
   synonyms?: string;
   unit_price?: number;
 }

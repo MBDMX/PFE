@@ -186,11 +186,16 @@ function ClientAppWrapper({ children }: { children: React.ReactNode }) {
 
   // 1. Service Worker Registration & Initial Sync
   useEffect(() => {
-    if ('serviceWorker' in navigator) {
+    if ('serviceWorker' in navigator && window.location.protocol === 'http:') {
       window.addEventListener('load', () => {
-        navigator.serviceWorker.register('/sw.js')
-          .then(reg => console.log('SW Registered', reg.scope))
-          .catch(err => console.error('SW Failed', err));
+        // Only try to register if we are NOT in local dev or if we explicitly need it
+        navigator.serviceWorker.register('/sw.js', { updateViaCache: 'none' })
+          .then(reg => {
+             // console.log('SW Registered', reg.scope);
+          })
+          .catch(err => {
+            if (err.name !== 'AbortError') console.error('SW Failed', err);
+          });
       });
     }
 

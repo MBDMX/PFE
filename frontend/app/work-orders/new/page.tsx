@@ -1,5 +1,5 @@
 'use client';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { 
   ArrowLeft, 
@@ -47,6 +47,14 @@ const SAP_TEMPLATES = {
 };
 
 export default function NewWorkOrder() {
+  return (
+    <Suspense fallback={<div className="h-screen flex items-center justify-center text-slate-500 animate-pulse uppercase font-black text-xs tracking-widest text-center">Initialisation...</div>}>
+      <NewWorkOrderContent />
+    </Suspense>
+  );
+}
+
+function NewWorkOrderContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [loading, setLoading] = useState(false);
@@ -79,6 +87,7 @@ export default function NewWorkOrder() {
   const [selectedParts, setSelectedParts] = useState<any[]>([]);
   const [currentPartCode, setCurrentPartCode] = useState('');
   const [currentPartQty, setCurrentPartQty] = useState(1);
+  const [aiResults, setAiResults] = useState<any[]>([]);
 
   useEffect(() => {
     const loadInitialData = async () => {
@@ -352,40 +361,69 @@ export default function NewWorkOrder() {
 
           {/* Spare Parts Card */}
           <div className="azure-card p-10 flex flex-col">
-            <div className="flex items-center gap-3 mb-6 border-b border-white/5 pb-5">
-              <Package size={24} className="text-emerald-400" />
-              <h2 className="text-sm font-black text-white uppercase tracking-widest">Pièces de Rechange Requises</h2>
+            <div className="flex items-center justify-between mb-6 border-b border-white/5 pb-5">
+              <div className="flex items-center gap-3">
+                <Package size={24} className="text-emerald-400" />
+                <h2 className="text-sm font-black text-white uppercase tracking-widest">Pièces de Rechange (IA Search)</h2>
+              </div>
+              <div className="flex items-center gap-2 bg-blue-500/10 border border-blue-500/20 px-3 py-1 rounded-full">
+                <div className="size-1.5 rounded-full bg-blue-400 animate-pulse" />
+                <span className="text-[0.6rem] font-black text-blue-400 uppercase tracking-widest">IA 100% Active</span>
+              </div>
             </div>
 
-            <div className="grid grid-cols-3 gap-3 mb-6">
-              <div className="col-span-2">
-                <select 
-                  className="w-full bg-slate-950 border border-white/10 rounded-[1.25rem] py-4 px-5 text-white text-sm font-bold appearance-none"
-                  value={currentPartCode}
-                  onChange={(e) => setCurrentPartCode(e.target.value)}
-                >
-                  <option value="">Chercher une pièce...</option>
-                  {stock.map(s => (
-                    <option key={s.id} value={s.reference}>{s.name} ({s.quantity} dispo)</option>
-                  ))}
-                </select>
-              </div>
-              <div className="flex gap-2">
+            <div className="space-y-4 mb-6">
+              <div className="relative group">
                 <input 
-                  type="number"
-                  min="1"
-                  className="w-full bg-slate-950 border border-white/10 rounded-xl py-4 px-4 text-white text-center font-bold"
-                  value={currentPartQty}
-                  onChange={(e) => setCurrentPartQty(Number(e.target.value))}
+                  type="text"
+                  className="w-full bg-slate-950 border border-white/10 rounded-2xl py-4 pl-5 pr-12 text-white text-sm font-bold placeholder:text-slate-600 focus:outline-none focus:border-emerald-500/50 transition-all"
+                  placeholder="Décrivez ce que vous cherchez... (ex: truc pour serrer)"
+                  onChange={async (e) => {
+                    const q = e.target.value;
+                    if (q.length > 2) {
+                      const results = await gmaoApi.searchStockAI(q);
+                      setAiResults(results);
+                    } else {
+                      setAiResults([]);
+                    }
+                  }}
                 />
-                <button 
-                  type="button"
-                  onClick={handleAddPart}
-                  className="size-14 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl flex items-center justify-center shrink-0 transition-colors shadow-lg shadow-emerald-500/20"
-                >
-                  <Plus size={24} />
-                </button>
+                <div className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-500">
+                  <Package size={18} />
+                </div>
               </div>
+
+              {/* AI Search Results Dropdown */}
+              {aiResults.length > 0 && (
+                <div className="bg-slate-900 border border-white/10 rounded-2xl overflow-hidden shadow-2xl animate-in fade-in zoom-in-95 duration-200 z-50">
+                  {aiResults.map((r: any) => (
+                    <button
+                      key={r.id}
+                      type="button"
+                      onClick={() => {
+                        setSelectedParts([...selectedParts, { 
+                          part_code: r.reference, 
+                          part_name: r.name, 
+                          quantity: 1 
+                        }]);
+                        setAiResults([]);
+                      }}
+                      className="w-full flex items-center justify-between p-4 hover:bg-white/5 border-b border-white/5 last:border-none transition-colors text-left"
+                    >
+                      <div className="flex flex-col">
+                        <span className="text-sm font-bold text-white">{r.name}</span>
+                        <span className="text-[0.65rem] font-bold text-slate-500 uppercase tracking-widest">{r.reference} • {r.search_reason}</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <div className="text-[0.6rem] font-black text-emerald-400 bg-emerald-500/10 px-2 py-1 rounded">
+                          {r.search_score}%
+                        </div>
+                        <Plus size={16} className="text-slate-500" />
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
 
             <div className="flex-1 bg-slate-950/30 rounded-3xl border border-white/5 overflow-hidden">

@@ -1,4 +1,5 @@
 import { Package, MapPin, ShoppingCart } from 'lucide-react';
+import { SmartPartImage } from '@/components/stock/SmartPartImage';
 import { StockItem, getPieceIcon } from './types';
 
 interface Props {
@@ -38,19 +39,12 @@ export default function InventoryTable({ items, isLoading, canOrder, onOrder }: 
                   <tr key={item.id} className="group">
                     <td>
                       <div className="flex items-center gap-4">
-                        {item.image ? (
-                          <div className="size-12 rounded-xl bg-slate-800 flex items-center justify-center border border-white/5 overflow-hidden">
-                            <img
-                              src={item.image}
-                              alt={item.name}
-                              className="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity"
-                            />
-                          </div>
-                        ) : (
-                          <div className={`size-12 rounded-xl bg-gradient-to-br ${icon.gradient} flex items-center justify-center border ${icon.border}`}>
-                            <span className="text-lg">{icon.icon}</span>
-                          </div>
-                        )}
+                        <SmartPartImage 
+                          partId={item.id}
+                          partName={item.name}
+                          initialImage={item.image}
+                          icon={icon.icon}
+                        />
                         <div>
                           <div className="font-bold text-white group-hover:text-blue-400 transition-colors uppercase tracking-tight text-sm">
                             {item.name}

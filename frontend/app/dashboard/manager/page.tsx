@@ -10,6 +10,7 @@ import OTStatusChart from './_components/OTStatusChart';
 import RecentOTTable from './_components/RecentOTTable';
 import AlertsWidget from './_components/AlertsWidget';
 import ReliabilityWidget from './_components/ReliabilityWidget';
+import MLHealthWidget from './_components/MLHealthWidget';
 import NotificationCenter from '../../../components/ui/NotificationCenter';
 import { ManagerStats, WorkOrder } from './_components/types';
 
@@ -158,14 +159,15 @@ export default function ManagerDashboard() {
                 <AlertsWidget workOrders={wos} lowStock={stats?.lowStock ?? 0} />
             </div>
 
-            {/* ── Reliability KPIs (MTBF / MTTR) + Table OT récents ── */}
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                <div className="lg:col-span-1">
-                    <ReliabilityWidget />
-                </div>
-                <div className="lg:col-span-2">
-                    <RecentOTTable workOrders={wos} />
-                </div>
+            {/* ── Predictive & Reliability KPIs ── */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <MLHealthWidget />
+                <ReliabilityWidget />
+            </div>
+
+            {/* ── Recent OT Table ── */}
+            <div className="grid grid-cols-1 gap-6">
+                <RecentOTTable workOrders={wos} />
             </div>
 
         </div>

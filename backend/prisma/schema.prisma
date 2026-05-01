@@ -95,7 +95,7 @@ model WorkOrderPart {
 model Stock {
   id         Int      @id @default(autoincrement())
   name       String?
-  reference  String?
+  reference  String?  @unique
   quantity   Int?
   unit       String?
   location   String?

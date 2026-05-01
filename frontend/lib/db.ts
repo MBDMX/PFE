@@ -6,7 +6,7 @@ import Dexie, { type EntityTable } from 'dexie';
 
 export interface OfflineAction {
   id?: number;
-  type: 'CREATE_WORK_ORDER' | 'UPDATE_WORK_ORDER' | 'DELETE_WORK_ORDER' | 'APPROVE_DELETION' | 'REJECT_DELETION' | 'ADD_PART' | 'CREATE_PARTS_REQUEST' | 'APPROVE_PARTS_REQUEST' | 'REJECT_PARTS_REQUEST' | 'TIMER_START' | 'TIMER_STOP' | 'SYNC_SAP_MACHINES' | 'SYNC_SAP_OTS' | 'RESET_SYSTEM';
+  type: 'CREATE_WORK_ORDER' | 'UPDATE_WORK_ORDER' | 'DELETE_WORK_ORDER' | 'APPROVE_DELETION' | 'REJECT_DELETION' | 'ADD_PART' | 'CREATE_PARTS_REQUEST' | 'APPROVE_PARTS_REQUEST' | 'REJECT_PARTS_REQUEST' | 'TIMER_START' | 'TIMER_STOP' | 'SYNC_SAP_MACHINES' | 'SYNC_SAP_OTS' | 'RESET_SYSTEM' | 'CREATE_STOCK_MOVEMENT' | 'CREATE_USER';
   endpoint: string;
   method: 'POST' | 'PATCH' | 'PUT' | 'DELETE';
   payload: any;
@@ -70,8 +70,8 @@ class GMAODatabase extends Dexie {
       metadata: 'key'
     });
 
-    // v4: Clean migration — clear all master data caches to remove duplicates
-    this.version(4).stores({
+    // v14: Local Hosting (No more CORS, 100% stable)
+    this.version(14).stores({
       syncQueue: '++id, type, status, timestamp',
       machines: 'id, reference, name',
       stock: 'id, reference, name',
@@ -83,15 +83,8 @@ class GMAODatabase extends Dexie {
       stats: 'key',
       metadata: 'key'
     }).upgrade(tx => {
-      tx.table('machines').clear();
       tx.table('stock').clear();
-      tx.table('technicians').clear();
-      tx.table('workOrders').clear();
-      tx.table('partsRequests').clear();
-      tx.table('stockMovements').clear();
-      tx.table('workSessions').clear();
-      tx.table('metadata').clear();
-      console.log('✅ DB v4: Master data cleared — duplicates removed.');
+      console.log('✅ DB v14: Stock cache cleared for Local Hosting.');
     });
   }
 }

@@ -3,14 +3,14 @@ import { useState, useEffect } from 'react';
 import { TrendingUp, Package, Box } from 'lucide-react';
 import { gmaoApi } from '../../../../services/api';
 
-export default function TopPieces() {
+export default function TopPieces({ movements: propMovements }: { movements?: any[] }) {
     const [topPieces, setTopPieces] = useState<any[]>([]);
-    const [loading, setLoading] = useState(true);
+    const [loading, setLoading] = useState(!propMovements);
 
     useEffect(() => {
         const fetchTopPieces = async () => {
             try {
-                const movements = await gmaoApi.getStockMovements();
+                const movements = propMovements || await gmaoApi.getStockMovements();
                 const outMovements = movements.filter((m: any) => m.type === 'OUT');
                 
                 const stats = outMovements.reduce((acc: any, m: any) => {
@@ -38,7 +38,7 @@ export default function TopPieces() {
             }
         };
         fetchTopPieces();
-    }, []);
+    }, [propMovements]);
 
     if (loading) return <div className="h-64 azure-card animate-pulse bg-slate-900/20" />;
 
