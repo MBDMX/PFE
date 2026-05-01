@@ -21,3 +21,4 @@ thefuzz==0.22.1
 python-Levenshtein==0.25.1
 rapidfuzz>=3.0.0
 pandas>=2.0.0
+scikit-learn>=1.2.0
