@@ -2,7 +2,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import {
     History, ArrowUpRight, ArrowDownLeft, User,
-    Search, Calendar
+    Search, Calendar, Download
 } from 'lucide-react';
 import { gmaoApi } from '../../../../services/api';
 
@@ -76,6 +76,21 @@ export default function Traceability() {
         });
     }, [movements, mode, customFrom, customTo, search]);
 
+    const handleExport = () => {
+        const header = 'Date,Type,Référence,Désignation,Quantité,Magasinier,Origine';
+        const rows = filtered.map(m => 
+            `${m.date},${m.type},${m.part_code},${m.part_name},${m.quantity},${m.user_name},${m.request_id ? `PR #${m.request_id}` : m.work_order_id ? `OT #${m.work_order_id}` : 'MANUEL'}`
+        );
+        const csv = [header, ...rows].join('\n');
+        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `reporting_stock_${new Date().toISOString().slice(0, 10)}.csv`;
+        link.click();
+        URL.revokeObjectURL(url);
+    };
+
 
 
     const MODES: { key: RangeMode; label: string }[] = [
@@ -140,6 +155,16 @@ export default function Traceability() {
                         className="w-full bg-slate-950/50 border border-white/10 rounded-xl py-1.5 pl-8 pr-3 text-xs text-white focus:outline-none focus:border-blue-500/50 transition-all font-bold placeholder:text-slate-700"
                     />
                 </div>
+
+                <button 
+                    onClick={handleExport}
+                    disabled={filtered.length === 0}
+                    className="flex items-center gap-2 px-4 py-2 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/20 text-emerald-400 rounded-xl text-[0.65rem] font-black uppercase tracking-widest transition-all disabled:opacity-50 active:scale-95"
+                >
+                    <Download size={14} />
+                    Exporter CSV
+                </button>
+            </div>
             </div>
 
 

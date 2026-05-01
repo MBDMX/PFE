@@ -67,6 +67,13 @@ export const FaceLogin = ({ onSuccess }: FaceLoginProps) => {
         setMessage('Chargement de l\'IA...');
 
         try {
+            // navigator.mediaDevices is only available in secure contexts (HTTPS or localhost)
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                toastError('Contexte non sécurisé', 'La caméra nécessite HTTPS ou localhost. Accédez via http://localhost:3000');
+                setIsOpen(false);
+                return;
+            }
+
             // 1. Load AI models (cached after first load)
             await ensureModels();
 

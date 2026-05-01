@@ -15,6 +15,7 @@ export const FaceEnroll = () => {
     const [progress, setProgress] = useState(0);
     const [currentStep, setCurrentStep] = useState<ScanStep>('FRONT');
     const [enrolling, setEnrolling] = useState(false);
+    const collectedDescriptors = useRef<number[][]>([]);
     const { success, error } = useToast();
 
     const getHeadPose = (landmarks: faceapi.FaceLandmarks68) => {
@@ -44,6 +45,14 @@ export const FaceEnroll = () => {
         setStatus('scanning');
         try {
             if (!modelsLoaded) await loadModels();
+
+            // navigator.mediaDevices is only available on HTTPS or localhost
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                error('Contexte non sécurisé', 'La caméra nécessite HTTPS ou localhost. Accédez via http://localhost:3000');
+                setStatus('error');
+                return;
+            }
+
             const s = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 } });
             setStream(s);
             if (videoRef.current) videoRef.current.srcObject = s;
@@ -54,6 +63,16 @@ export const FaceEnroll = () => {
             error('Erreur', 'Impossible d\'ouvrir la caméra');
             setStatus('error');
         }
+    };
+
+    // Average multiple float32 descriptors into one
+    const averageDescriptors = (descriptors: number[][]): number[] => {
+        const len = descriptors[0].length;
+        const avg = new Array(len).fill(0);
+        for (const d of descriptors) {
+            for (let i = 0; i < len; i++) avg[i] += d[i];
+        }
+        return avg.map(v => v / descriptors.length);
     };
 
     useEffect(() => {
@@ -77,10 +96,15 @@ export const FaceEnroll = () => {
                         }
 
                         if (stepValid) {
+                            // Collect this pose's descriptor
+                            collectedDescriptors.current.push(Array.from(detection.descriptor));
+
                             if (currentStep === 'DOWN') {
                                 setProgress(100);
                                 setEnrolling(false);
-                                const res = await gmaoApi.enrollFace(Array.from(detection.descriptor));
+                                // Save the AVERAGE of all 5 pose descriptors for robust matching
+                                const averaged = averageDescriptors(collectedDescriptors.current);
+                                const res = await gmaoApi.enrollFace(averaged);
                                 if (res) {
                                     setStatus('success');
                                     setCurrentStep('SUCCESS');
