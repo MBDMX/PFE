@@ -8,6 +8,7 @@ import {
 import { Html5Qrcode } from 'html5-qrcode';
 import { gmaoApi } from '../../../../services/api';
 import { useToast } from '../../../../components/ui/toast';
+import { Html5Qrcode } from 'html5-qrcode';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -70,11 +71,65 @@ export default function PdaScanner() {
     // Auto-focus on mount
     useEffect(() => { inputRef.current?.focus(); }, []);
 
-    // ── Camera Scanner Logic ───────────────────────────────────────────────
+    // QR Scanner Logic
     useEffect(() => {
+        let scanner: Html5Qrcode | null = null;
+
         if (cameraActive) {
-            const scanner = new Html5Qrcode('reader');
-            scannerRef.current = scanner;
+            scanner = new Html5Qrcode('qr-reader');
+            const config = { fps: 10, qrbox: { width: 250, height: 250 } };
+
+            scanner.start(
+                { facingMode: 'environment' },
+                config,
+                (decodedText) => {
+                    setQuery(decodedText);
+                    setCameraActive(false);
+                    // Trigger search automatically
+                    setTimeout(() => handleSearchWithQuery(decodedText), 100);
+                },
+                () => {} // Silent on error
+            ).catch(err => {
+                console.error('QR Error:', err);
+                toastError('Caméra', 'Impossible d\'accéder à la caméra');
+                setCameraActive(false);
+            });
+        }
+
+        return () => {
+            if (scanner) {
+                scanner.stop().catch(() => {});
+            }
+        };
+    }, [cameraActive]);
+
+    // Helper for automatic search after scan
+    async function handleSearchWithQuery(q: string) {
+        if (!q.trim()) return;
+        setSearching(true);
+        setFound(null);
+        setNotFound(false);
+        setAction(null);
+        try {
+            const stock: StockItem[] = await gmaoApi.getStock();
+            const match = stock.find(
+                s => s.reference.toLowerCase() === q.trim().toLowerCase() ||
+                     s.name.toLowerCase().includes(q.trim().toLowerCase())
+            );
+            if (match) {
+                setFound(match);
+                setLocationInput(match.location);
+                success('✓ QR Code Détecté', match.name);
+            } else {
+                setNotFound(true);
+                toastError('Inconnu', `Aucune pièce trouvée pour "${q}"`);
+            }
+        } catch {
+            toastError('Erreur', 'Impossible de contacter le serveur');
+        } finally {
+            setSearching(false);
+        }
+    }
 
             const config = { fps: 10, qrbox: { width: 250, height: 250 } };
 
@@ -254,13 +309,16 @@ export default function PdaScanner() {
                         </button>
                     </div>
 
-                    {/* Camera note & Scanner */}
+                    {/* Camera Scanner View */}
                     {cameraActive && (
-                        <div className="mt-4 space-y-3">
-                            <div id="reader" className="overflow-hidden rounded-2xl border-2 border-violet-500/30 bg-black"></div>
-                            <div className="p-3 rounded-xl bg-violet-500/5 border border-violet-500/20 text-[0.65rem] text-violet-400 font-bold text-center animate-in fade-in duration-300">
-                                📷 Pointez la caméra vers le QR code — la saisie se remplira automatiquement.
-                                <br /><span className="text-slate-500">(Nécessite HTTPS en production)</span>
+                        <div className="mt-4 animate-in zoom-in-95 duration-300">
+                            <div 
+                                id="qr-reader" 
+                                className="overflow-hidden rounded-2xl border-2 border-violet-500/30 bg-black aspect-square max-w-[400px] mx-auto shadow-2xl shadow-violet-500/20"
+                            />
+                            <div className="mt-4 p-3 rounded-xl bg-violet-500/5 border border-violet-500/20 text-[0.65rem] text-violet-400 font-bold text-center">
+                                📷 Pointez la caméra vers le QR code.
+                                <br /><span className="text-slate-500">(Nécessite l'autorisation de la caméra)</span>
                             </div>
                         </div>
                     )}

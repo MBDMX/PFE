@@ -1,1 +1,10 @@
 @import "../styles/globals.css";
+
+/* Force font size increase */
+:root {
+  font-size: 125% !important;
+}
+
+html {
+  font-size: 125% !important;
+}

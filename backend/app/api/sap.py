@@ -13,7 +13,6 @@ async def get_sap_status():
 @router.get("/items")
 async def get_sap_items(top: int = 50):
     """Récupère les articles via Service Layer (Port 50000)."""
-    # Ensure we're logged in
     sap_client.login_sl()
     items = sap_client.get_items(top=top)
     return {"count": len(items) if isinstance(items, list) else 0, "data": items}
@@ -29,11 +28,7 @@ async def get_sap_users():
 
 @router.get("/machines")
 async def get_sap_machines():
-    """Récupère les machines via ProcessForce (Port 54001).
-    
-    IMPORTANT: Nécessite que la compagnie soit enregistrée dans le 
-    ProcessForce Addon Manager côté SAP.
-    """
+    """Récupère les machines via ProcessForce (Port 54001)."""
     machines = sap_client.get_maintainable_items()
     if isinstance(machines, dict) and "error" in machines:
         raise HTTPException(status_code=503, detail=machines["error"])

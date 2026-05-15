@@ -17,6 +17,10 @@
   box-sizing: border-box;
 }
 
+html {
+  font-size: 120%; /* Agrandissement global de l'interface (Version XL) */
+}
+
 body {
   background: var(--bg-dark);
   color: var(--text-main);
@@ -33,7 +37,7 @@ body {
 }
 
 .sidebar {
-  width: 280px;
+  width: 17.5rem;
   background: rgba(15, 23, 42, 0.8);
   backdrop-filter: blur(12px);
   border-right: 1px solid var(--bg-card-border);
@@ -94,9 +98,9 @@ body {
 
 .main-content {
   flex: 1;
-  margin-left: 280px;
+  margin-left: 17.5rem;
   padding: 2.5rem;
-  width: calc(100% - 280px);
+  width: calc(100% - 17.5rem);
 }
 
 .page-header {
@@ -233,4 +237,102 @@ body {
 }
 ::-webkit-scrollbar-thumb:hover {
   background: rgba(255, 255, 255, 0.2);
+}
+
+/* ── Professional Industrial PDF Report ── */
+@media print {
+  body {
+    background: white !important;
+    color: black !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    font-family: 'Outfit', sans-serif;
+  }
+
+  .sidebar, .no-print, #sidebar-sync-btn, .guide-bubble, .fixed {
+    display: none !important;
+  }
+
+  .main-content {
+    margin: 0 !important;
+    padding: 2rem !important;
+    width: 100% !important;
+    background: white !important;
+    display: block !important;
+  }
+
+  .azure-card {
+    background: white !important;
+    border: 1.5px solid #cbd5e1 !important;
+    color: black !important;
+    box-shadow: none !important;
+    backdrop-filter: none !important;
+    transform: none !important;
+    page-break-inside: avoid;
+    margin-bottom: 1.5rem !important;
+    border-radius: 0.75rem !important;
+  }
+
+  h1, h2, h3, h4, .text-white, .font-black {
+    color: #0f172a !important;
+  }
+
+  .text-slate-500, .text-slate-400 {
+    color: #475569 !important;
+  }
+
+  .azure-badge {
+    border: 1px solid #e2e8f0 !important;
+    background: #f8fafc !important;
+    color: #475569 !important;
+  }
+
+  table {
+    width: 100% !important;
+    border-collapse: collapse !important;
+    margin: 1.5rem 0 !important;
+  }
+
+  th {
+    background: #f1f5f9 !important;
+    color: #0f172a !important;
+    border: 1px solid #e2e8f0 !important;
+    padding: 12px !important;
+    font-size: 0.75rem !important;
+    text-transform: uppercase !important;
+  }
+
+  td {
+    border: 1px solid #e2e8f0 !important;
+    color: #1e293b !important;
+    padding: 10px !important;
+    font-size: 0.8rem !important;
+  }
+
+  /* Report Header */
+  .main-content::before {
+    content: "RAPPORT TECHNIQUE D'EXPLOITATION - GMAO PRO EXCELLENCE";
+    display: block;
+    text-align: center;
+    font-weight: 900;
+    font-size: 1.4rem;
+    padding: 2.5rem 0;
+    border-bottom: 3px solid #2563eb;
+    margin-bottom: 2.5rem;
+    color: #2563eb;
+  }
+
+  /* Industry Signature Area */
+  .main-content::after {
+    content: "Cachet Magasin / Validation Responsable Maintenance";
+    display: block;
+    margin-top: 4rem;
+    padding-top: 1rem;
+    border-top: 1px dashed #cbd5e1;
+    font-size: 0.8rem;
+    font-weight: 800;
+    color: #94a3b8;
+    text-transform: uppercase;
+    text-align: center;
+  }
 }

@@ -23,10 +23,16 @@ export default function ReliabilityWidget() {
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
-        gmaoApi.getReliabilityKpis()
-            .then(setData)
-            .catch(console.error)
-            .finally(() => setLoading(false));
+        const fetchData = () => {
+            gmaoApi.getReliabilityKpis()
+                .then(setData)
+                .catch(console.error)
+                .finally(() => setLoading(false));
+        };
+
+        fetchData();
+        const interval = setInterval(fetchData, 5000); // Rafraîchir toutes les 5 secondes
+        return () => clearInterval(interval);
     }, []);
 
     if (loading) {
@@ -76,7 +82,7 @@ export default function ReliabilityWidget() {
                 <div className="azure-card p-4 bg-amber-500/5 flex flex-col gap-1 items-center text-center">
                     <Clock size={18} className="text-amber-400 mb-1" />
                     <div className="text-xl font-black text-white">
-                        {data.mttr_hours > 0 ? `${data.mttr_hours}h` : 'N/A'}
+                        {data.total_corrective_ots > 0 ? `${data.mttr_hours.toFixed(1)}h` : 'N/A'}
                     </div>
                     <div className="text-[0.55rem] font-black uppercase tracking-wider text-slate-500">MTTR</div>
                     <div className="text-[0.5rem] font-bold text-slate-600 uppercase">Tps de réparation</div>
@@ -94,15 +100,15 @@ export default function ReliabilityWidget() {
             </div>
 
             {/* Machine Breakdown */}
-            {data.machine_breakdown.length > 0 && (
+            {(data.machine_breakdown ?? []).length > 0 && (
                 <div>
                     <div className="flex items-center gap-2 text-[0.6rem] font-black uppercase tracking-widest text-slate-500 mb-3">
                         <BarChart2 size={12} />
                         Pannes par Équipement
                     </div>
                     <div className="space-y-2">
-                        {data.machine_breakdown.slice(0, 5).map((m) => {
-                            const barPct = Math.min((m.failure_count / (data.machine_breakdown[0]?.failure_count || 1)) * 100, 100);
+                        {(data.machine_breakdown ?? []).slice(0, 5).map((m) => {
+                            const barPct = Math.min((m.failure_count / ((data.machine_breakdown ?? [])[0]?.failure_count || 1)) * 100, 100);
                             return (
                                 <div key={m.equipment_id} className="flex items-center gap-3">
                                     <div className="text-[0.6rem] font-black text-slate-400 uppercase w-20 truncate shrink-0">
@@ -127,7 +133,7 @@ export default function ReliabilityWidget() {
                 </div>
             )}
 
-            {data.machine_breakdown.length === 0 && (
+            {(data.machine_breakdown ?? []).length === 0 && (
                 <div className="flex-1 flex flex-col items-center justify-center gap-2 text-center">
                     <AlertTriangle size={28} className="text-slate-700" />
                     <p className="text-xs font-bold text-slate-500 italic uppercase tracking-widest">

@@ -21,6 +21,12 @@ class UserOut(BaseModel):
     name: str
     manager_id: Optional[int] = None
     team: Optional[str] = None
+    face_descriptor: Optional[str] = Field(None, exclude=True) # Toujours exclure du JSON
+
+    @computed_field
+    def has_face_id(self) -> bool:
+        return bool(self.face_descriptor)
+
     model_config = ConfigDict(from_attributes=True)
 
 class Token(BaseModel):
@@ -33,7 +39,7 @@ class TokenRefreshRequest(BaseModel):
     refresh_token: str
 
 class MachineBase(BaseModel):
-    name: str; reference: str; location: str; status: str; health_score: int
+    name: str; reference: str; location: str; status: str; health_score: Optional[int] = 50
     last_maintenance_date: Optional[str] = None
     next_maintenance_date: Optional[str] = None
     maintenance_frequency_days: Optional[int] = 90
@@ -50,6 +56,8 @@ class StockBase(BaseModel):
     location: Optional[str] = None
     image: Optional[str] = None
     synonyms: Optional[str] = None
+    category: Optional[str] = None
+    image_verified: Optional[bool] = False
     unit_price: Optional[float] = 0.0
 
 class Stock(StockBase):
@@ -68,9 +76,9 @@ class WorkOrderPart(BaseModel):
 class WorkOrderStep(BaseModel):
     id: int
     work_order_id: int
-    description: str
-    is_done: bool
-    order_index: int
+    description: Optional[str] = None
+    is_done: bool = False
+    order_index: Optional[int] = 0
     model_config = ConfigDict(from_attributes=True)
 
 class WorkOrderStepUpdate(BaseModel):
@@ -79,7 +87,7 @@ class WorkOrderStepUpdate(BaseModel):
 class WorkOrder(BaseModel):
     id: int
     sap_order_id: Optional[str] = None
-    title: str
+    title: Optional[str] = "Sans titre"
     description: Optional[str] = None
     type: Optional[str] = "corrective"
     priority: Optional[str] = "medium"
@@ -110,6 +118,7 @@ class WorkOrder(BaseModel):
         return round(sum(p.quantity * (getattr(p, 'unit_price_at_consumption', 0.0) or 0.0) for p in self.parts), 2) if self.parts else 0.0
     
     model_config = ConfigDict(from_attributes=True)
+
 
 class WorkOrderCreate(BaseModel):
     title: str
@@ -142,6 +151,7 @@ class WorkSessionCreate(WorkSessionBase):
 class WorkSession(WorkSessionBase):
     id: int
     work_order_title: Optional[str] = None
+    total_previous_seconds: Optional[int] = 0
     
     model_config = ConfigDict(from_attributes=True)
 

@@ -1,6 +1,7 @@
 import os
 import json
 import ssl
+from datetime import datetime
 import requests
 import urllib3
 from requests.adapters import HTTPAdapter
@@ -46,7 +47,12 @@ class SAPClient:
             cls._sl_session.verify = False
             # ProcessForce / AppEngine session
             cls._pf_session = requests.Session()
+            cls._pf_session.mount('https://', TLSAdapter())
             cls._pf_session.verify = False
+            
+            # Load URLs from environment
+            cls.sl_url = os.getenv("SAP_SL_URL")
+            cls.pf_url = os.getenv("SAP_PF_URL")
         return cls._instance
 
     # =========================================================
@@ -54,7 +60,10 @@ class SAPClient:
     # env: SAP_SL_URL, SAP_COMPANY_DB, SAP_USERNAME, SAP_PASSWORD
     # =========================================================
     def login_sl(self) -> bool:
-        url = f"{os.getenv('SAP_SL_URL')}/Login"
+        if not self.sl_url:
+            print("[SL] Error: SAP_SL_URL is not set.")
+            return False
+        url = f"{self.sl_url}/Login"
         payload = {
             "CompanyDB": os.getenv("SAP_COMPANY_DB"),
             "UserName":  os.getenv("SAP_USERNAME"),
@@ -73,7 +82,7 @@ class SAPClient:
 
     def _sl_get(self, endpoint: str):
         """GET against Service Layer with auto re-login on 401."""
-        url = f"{os.getenv('SAP_SL_URL')}{endpoint}"
+        url = f"{self.sl_url}{endpoint}"
         try:
             resp = self._sl_session.get(url, timeout=15)
             if resp.status_code == 401 and self.login_sl():
@@ -96,6 +105,68 @@ class SAPClient:
     def get_users(self):
         return self._sl_get("/Users?$select=UserCode,UserName,eMail,Department")
 
+    def create_purchase_request(self, item_code: str, quantity: float, remarks: str = "", user_name: str = "GMAO User", supplier_info: str = "") -> dict:
+        """Crée une Demande d'Achat (Purchase Request) dans SAP B1 avec traçabilité."""
+        url = f"{self.sl_url}/PurchaseRequests"
+        
+        # Construction de la remarque détaillée pour la traçabilité
+        detailed_remarks = f"Demandé par : {user_name}\n"
+        if supplier_info:
+            detailed_remarks += f"Fournisseur suggéré : {supplier_info}\n"
+        detailed_remarks += f"Motif : {remarks or 'Besoin maintenance GMAO'}"
+
+        payload = {
+            "DocDueDate": datetime.now().strftime("%Y-%m-%d"), 
+            "ReqType": "12",
+            "Remarks": detailed_remarks,
+            "PurchaseRequestLines": [
+                {
+                    "ItemCode": item_code,
+                    "Quantity": quantity,
+                }
+            ]
+        }
+        try:
+            resp = self._sl_session.post(url, json=payload, timeout=15)
+            if resp.status_code == 401 and self.login_sl():
+                resp = self._sl_session.post(url, json=payload, timeout=15)
+            
+            if resp.status_code in (200, 201):
+                return resp.json()
+            print(f"[SL] PR Error {resp.status_code}: {resp.text[:200]}")
+            return {}
+        except Exception as e:
+            print(f"[SL] PR Exception: {e}")
+            return {}
+
+    def create_stock_transfer(self, item_code: str, quantity: float, from_wh: str, to_wh: str, remarks: str = "") -> dict:
+        """Crée un transfert de stock (Stock Transfer) dans SAP B1."""
+        url = f"{self.sl_url}/StockTransfers"
+        payload = {
+            "FromWarehouse": from_wh,
+            "Comments": remarks or f"Transfert GMAO - {item_code}",
+            "StockTransferLines": [
+                {
+                    "ItemCode": item_code,
+                    "Quantity": quantity,
+                    "FromWarehouseCode": from_wh,
+                    "WarehouseCode": to_wh,
+                }
+            ]
+        }
+        try:
+            resp = self._sl_session.post(url, json=payload, timeout=15)
+            if resp.status_code == 401 and self.login_sl():
+                resp = self._sl_session.post(url, json=payload, timeout=15)
+            
+            if resp.status_code in (200, 201):
+                return resp.json()
+            print(f"[SL] Transfer Error {resp.status_code}: {resp.text[:200]}")
+            return {}
+        except Exception as e:
+            print(f"[SL] Transfer Exception: {e}")
+            return {}
+
     # =========================================================
     # COMPUTEC APPENGINE  (port 54001)
     # env: SAP_PF_URL, SAP_PF_COMPANY_ID, SAP_PF_API_KEY,
@@ -110,9 +181,15 @@ class SAPClient:
     # =========================================================
     def login_pf(self) -> bool:
         """Login to CompuTec AppEngine and obtain JWT token."""
-        url = f"{os.getenv('SAP_PF_URL')}/api/Login"
+        if not self.pf_url:
+            print("[PF] Error: SAP_PF_URL is not set.")
+            return False
+            
+        url = f"{self.pf_url}/api/Login"
+        company_id = os.getenv("SAP_PF_COMPANY_ID")
+        print(f"DEBUG: Using CompanyId from ENV: '{company_id}'")
         payload = {
-            "CompanyId": os.getenv("SAP_PF_COMPANY_ID"),   # Must be string "7546"
+            "CompanyId": company_id,
             "UserName":  os.getenv("SAP_USERNAME"),
             "Password":  os.getenv("SAP_PASSWORD"),
             "Language":  "ln_Null",
@@ -140,6 +217,7 @@ class SAPClient:
             "Authorization": f"Bearer {self._pf_token}",
             "CompanyId":     os.getenv("SAP_PF_COMPANY_ID"),
             "Accept":        "application/json",
+            "Content-Type":  "application/json",
         }
 
     def _pf_get(self, endpoint: str):
@@ -147,7 +225,7 @@ class SAPClient:
         if not self._pf_token:
             if not self.login_pf():
                 return []
-        url = f"{os.getenv('SAP_PF_URL')}{endpoint}"
+        url = f"{self.pf_url}{endpoint}"
         try:
             resp = self._pf_session.get(url, headers=self._pf_headers(), timeout=60)
             # Token expired or missing CompanyId header
@@ -162,6 +240,59 @@ class SAPClient:
             print(f"[PF] GET {endpoint} error: {e}")
             return []
 
+    def _pf_patch(self, endpoint: str, data: dict) -> bool:
+        """PATCH against ProcessForce OData."""
+        if not self._pf_token:
+            if not self.login_pf(): return False
+        url = f"{self.pf_url}{endpoint}"
+        try:
+            resp = self._pf_session.patch(url, json=data, headers=self._pf_headers(), timeout=60)
+            if resp.status_code in (401, 500) and self.login_pf():
+                resp = self._pf_session.patch(url, json=data, headers=self._pf_headers(), timeout=60)
+            if resp.status_code in (200, 204):
+                return True
+            print(f"[PF] PATCH {endpoint} => {resp.status_code}: {resp.text[:200]}")
+            return False
+        except Exception as e:
+            print(f"[PF] PATCH {endpoint} error: {e}")
+            return False
+
+    def _pf_post(self, endpoint: str, data: dict) -> dict:
+        """POST against ProcessForce OData."""
+        if not self._pf_token:
+            if not self.login_pf(): return {}
+        url = f"{self.pf_url}{endpoint}"
+        try:
+            resp = self._pf_session.post(url, json=data, headers=self._pf_headers(), timeout=60)
+            if resp.status_code in (401, 500) and self.login_pf():
+                resp = self._pf_session.post(url, json=data, headers=self._pf_headers(), timeout=60)
+            if resp.status_code in (200, 201):
+                return resp.json()
+            print(f"[PF] POST {endpoint} => {resp.status_code}: {resp.text[:200]}")
+            return {}
+        except Exception as e:
+            print(f"[PF] POST {endpoint} error: {e}")
+            return {}
+
+    def _pf_delete(self, endpoint: str) -> bool:
+        """DELETE against ProcessForce OData."""
+        if not self._pf_token:
+            if not self.login_pf(): return False
+        url = f"{self.pf_url}{endpoint}"
+        try:
+            resp = self._pf_session.delete(url, headers=self._pf_headers(), timeout=60)
+            if resp.status_code in (401, 500) and self.login_pf():
+                resp = self._pf_session.delete(url, headers=self._pf_headers(), timeout=60)
+            if resp.status_code in (200, 204):
+                return True
+            print(f"[PF] DELETE {endpoint} => {resp.status_code}: {resp.text[:200]}")
+            return False
+        except Exception as e:
+            print(f"[PF] DELETE {endpoint} error: {e}")
+            return False
+
+
+
     def get_maintainable_items(self, top: int = 100) -> list:
         """Fetch all Maintainable Items (machines) from ProcessForce."""
         return self._pf_get(f"/odata/ProcessForce/MaintainableItem?$top={top}")
@@ -169,6 +300,52 @@ class SAPClient:
     def get_maintenance_orders(self, top: int = 100) -> list:
         """Fetch Maintenance Orders (work orders) from ProcessForce."""
         return self._pf_get(f"/odata/ProcessForce/MaintenanceOrder?$top={top}")
+
+    def create_maintenance_order(self, wo_data: dict) -> dict:
+        """App -> SAP: Pousse un nouvel OT créé depuis la GMAO vers SAP ProcessForce."""
+        # 1. Récupérer les infos de la machine pour avoir le nom (U_MIName often required)
+        machine_code = wo_data.get("equipment_id", "")
+        machine_name = ""
+        if machine_code:
+            m_url = f"/odata/ProcessForce/MaintainableItem?$filter=Code eq '{machine_code}'"
+            res = self._pf_get(m_url)
+            if res and isinstance(res, list):
+                machine_name = res[0].get("Name", "")
+
+        payload = {
+            "U_Remarks": wo_data.get("title", "Créé via GMAO App"),
+            "U_MICode": machine_code,
+        }
+        
+        # On retire les dates pour le moment pour garantir le succès du POST minimal
+        # if wo_data.get("planned_start_date"):
+        #      p_date = str(wo_data["planned_start_date"])[:10]
+        #      payload["U_SchStartDate"] = f"{p_date}T08:00:00"
+        #      payload["U_SchEndDate"] = f"{p_date}T17:00:00"
+            
+        print(f"[SAP SYNC] Envoi du nouvel OT vers SAP: {payload}")
+        return self._pf_post("/odata/ProcessForce/MaintenanceOrder", payload)
+
+    def update_maintenance_order_status(self, doc_entry: str, status: str) -> bool:
+        """App -> SAP: Met à jour le statut d'un OT existant dans SAP."""
+        # Convertir le statut GMAO en statut SAP
+        sap_status = "WorkRequest"
+        if status == "in_progress": sap_status = "Started"
+        elif status == "done": sap_status = "Finished"
+        
+        payload = {"U_MOStatus": sap_status} 
+        print(f"[SAP SYNC] Mise à jour OT SAP {doc_entry} -> Statut {sap_status}")
+        return self._pf_patch(f"/odata/ProcessForce/MaintenanceOrder({doc_entry})", payload)
+
+    def delete_maintenance_order(self, doc_entry: str) -> bool:
+        """App -> SAP: Annule un OT existant dans SAP (au lieu de le supprimer physiquement)."""
+        print(f"[SAP SYNC] Annulation complète OT SAP {doc_entry}")
+        # On passe le statut à 'Cancelled' ET le champ système Canceled à 'Yes'
+        payload = {
+            "U_MOStatus": "Cancelled",
+            "Canceled": "Yes"
+        }
+        return self._pf_patch(f"/odata/ProcessForce/MaintenanceOrder({doc_entry})", payload)
 
     # =========================================================
     # STATUS
@@ -179,12 +356,12 @@ class SAPClient:
         return {
             "service_layer": {
                 "status":     "connected" if sl_ok else "disconnected",
-                "url":        os.getenv("SAP_SL_URL"),
+                "url":        self.sl_url,
                 "company_db": os.getenv("SAP_COMPANY_DB"),
             },
             "process_force": {
                 "status":     "connected" if pf_ok else "disconnected",
-                "url":        os.getenv("SAP_PF_URL"),
+                "url":        self.pf_url,
                 "company_id": os.getenv("SAP_PF_COMPANY_ID"),
                 "engine":     "CompuTec AppEngine",
             },

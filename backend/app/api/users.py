@@ -14,8 +14,29 @@ async def get_technicians(db: Prisma = Depends(get_db)):
 
 @router.get("/technician/timer/active", response_model=Optional[WorkSessionSchema])
 async def get_global_active_timer(db: Prisma = Depends(get_db), current_user = Depends(get_current_user)):
-    """Finds if the current technician has ANY active timer session."""
-    return await db.worksession.find_first(where={"technician_id": current_user.id, "end_time": None})
+    """Finds if the current technician has ANY active timer session and calculates previous time."""
+    active = await db.worksession.find_first(
+        where={"technician_id": current_user.id, "end_time": None},
+        include={"work_order": True}
+    )
+    if not active:
+        return None
+    
+    # Calculate previous time spent on THIS work order
+    previous_sessions = await db.worksession.find_many(
+        where={
+            "work_order_id": active.work_order_id,
+            "end_time": {"not": None}
+        }
+    )
+    total_previous_hours = sum(s.duration for s in previous_sessions)
+    
+    # Return everything in a custom dict to avoid schema constraints if needed, 
+    # but we'll try to keep it compatible.
+    res = active.dict()
+    res["total_previous_seconds"] = int(total_previous_hours * 3600)
+    res["work_order_title"] = active.work_order.title if active.work_order else "Intervention"
+    return res
 
 @router.get("/manager/technicians", response_model=List[UserOut])
 async def get_manager_technicians(db: Prisma = Depends(get_db), current_user = Depends(role_required(["admin", "manager"]))):

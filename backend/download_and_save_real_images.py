@@ -27,39 +27,37 @@ def download_image(url: str, filepath: str) -> bool:
 
 def search_and_download_image(part_name: str, part_id: int) -> str:
     """
-    Recherche une image sur DDG, essaie de la télécharger.
-    Retourne le chemin local final (ex: /static/parts/part_1.jpg).
+    Recherche une image technique précise avec logs de debug.
     """
     fallback = "/static/images/default.jpg"
-    query = f"{part_name} industriel équipement"
+    # On mixe français et anglais pour plus de résultats techniques précis
+    query = f"industrial spare part {part_name} component"
     
     local_filename = f"part_{part_id}.jpg"
     local_filepath = os.path.join("static", "parts", local_filename)
     local_url = f"/static/parts/{local_filename}"
 
-    # Si on a déjà téléchargé l'image pour cette pièce, on passe (gain de temps)
-    if os.path.exists(local_filepath) and os.path.getsize(local_filepath) > 0:
-        return local_url
+    FORBIDDEN = ["huile", "oil", "lubrifiant", "lubricant", "nettoyant", "spray", "grease", "graisse", "background", "wallpaper"]
 
     try:
         with DDGS() as ddgs:
-            # On demande 5 résultats au cas où les premiers bloqueraient le téléchargement
-            results = list(ddgs.images(
-                keywords=query,
-                region="fr-fr",
-                safesearch="moderate",
-                size="Medium",
-                type_image="photo",
-                max_results=5
-            ))
+            # On cherche 15 résultats pour avoir plus de choix
+            results = list(ddgs.images(keywords=query, region="wt-wt", size="Medium", max_results=15))
         
         if results:
             for r in results:
                 url = r.get("image", "")
-                if url and not url.endswith(".svg") and not url.endswith(".gif"):
-                    print(f"    Tentative de téléchargement: {url[:60]}...")
-                    success = download_image(url, local_filepath)
-                    if success:
+                title = r.get("title", "").lower()
+                
+                # Log pour comprendre ce qui se passe
+                print(f"      [🔍] Test: {title[:50]}...")
+
+                if any(bad in title for bad in FORBIDDEN):
+                    continue
+                    
+                if url and not any(ext in url for ext in [".svg", ".gif"]):
+                    if download_image(url, local_filepath):
+                        print(f"      [✅] Image choisie: {title[:40]}")
                         return local_url
                     
         return fallback

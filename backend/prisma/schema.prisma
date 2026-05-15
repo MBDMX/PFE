@@ -1,3 +1,4 @@
+
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
@@ -99,9 +100,11 @@ model Stock {
   quantity   Int?
   unit       String?
   location   String?
-  image      String?
-  synonyms   String?
-  unit_price Float    @default(0.0)
+  image          String?
+  synonyms       String?
+  category       String?    // Category from SAP or determined by AI
+  image_verified Boolean    @default(false) // Flag for human-in-the-loop validation
+  unit_price     Float      @default(0.0)
 
   @@map("stock_items")
 }
@@ -148,6 +151,7 @@ model StockMovement {
   work_order    WorkOrder? @relation(fields: [work_order_id], references: [id])
 }
 
+
 model WorkSession {
   id            Int       @id @default(autoincrement())
   work_order_id Int
@@ -160,3 +164,12 @@ model WorkSession {
   work_order    WorkOrder @relation(fields: [work_order_id], references: [id])
   technician    User      @relation(fields: [technician_id], references: [id])
 }
+
+model SyncAuditLog {
+  id        Int      @id @default(autoincrement())
+  endpoint  String
+  status    String   // "SUCCESS" ou "ERROR"
+  message   String?
+  timestamp DateTime @default(now())
+}
+

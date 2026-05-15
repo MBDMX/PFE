@@ -83,35 +83,45 @@ function TimerWidget({ workOrderId, initialTime = 0 }: { workOrderId: string, in
   }, [workOrderId]);
 
   const handleStart = async () => {
+    // 1. DÉMARRAGE OPTIMISTE (Immédiat)
+    const now = new Date().toISOString();
+    setActiveSession({ work_order_id: Number(workOrderId), start_time: now });
+    startLocalTimer(now);
+    
     try {
-      const session = await gmaoApi.startTimer(workOrderId);
-      if (session.offline) {
-        success("Chronomètre démarré (Mode Offline)");
-        const now = new Date().toISOString();
-        setActiveSession({ work_order_id: Number(workOrderId), start_time: now });
-        startLocalTimer(now);
-      } else {
-        await fetchActiveSession();
-        success("Intervention démarrée !");
-      }
+      await gmaoApi.startTimer(workOrderId);
+      // ✅ ON NE RECALIBRE PLUS : on garde l'heure locale 'now' pour éviter les sauts
+      success("Intervention démarrée !");
+      db.workOrders.update(Number(workOrderId), { status: 'in_progress' });
     } catch (err: any) {
-      const msg = err.response?.data?.detail || "Erreur lors du démarrage";
-      error(msg);
+      // Annuler l'optimisme en cas d'erreur réelle
+      stopLocalTimer();
+      setActiveSession(null);
+      error(err.response?.data?.detail || "Erreur serveur");
     }
   };
 
-  const handleStop = async () => {
+  const handleStop = async (finish: boolean = false) => {
+    // 1. ARRÊT OPTIMISTE
+    const finalElapsed = elapsed;
+    stopLocalTimer();
+    setActiveSession(null);
+
     try {
-      const res = await gmaoApi.stopTimer(workOrderId);
-      stopLocalTimer();
-      setActiveSession(null);
-      if (res.offline) {
-        success("Session enregistrée pour synchronisation");
-      } else {
-        success(`Session terminée !`);
+      const stopData = finish ? { status: 'done' } : { status: 'in_progress' };
+      await gmaoApi.stopTimer(workOrderId, stopData);
+      
+      if (finish) {
+        await gmaoApi.updateWorkOrder(workOrderId, { status: 'done' });
       }
+      
+      // Rafraîchir les données de l'OT
+      const freshWO = await gmaoApi.getWorkOrder(workOrderId);
+      await db.workOrders.put(freshWO);
+      
+      success(finish ? "Intervention terminée !" : "Intervention en pause.");
     } catch (err: any) {
-      error("Erreur lors de l'arrêt du chronomètre");
+      error("Erreur lors de l'arrêt");
     }
   };
 
@@ -144,7 +154,7 @@ function TimerWidget({ workOrderId, initialTime = 0 }: { workOrderId: string, in
 
       <div className="flex flex-col items-center justify-center pt-4">
         <div className={`text-5xl font-black mb-8 tracking-tighter tabular-nums ${isThisOTActive ? 'text-white' : 'text-slate-700'}`}>
-          {isThisOTActive ? formatTime(elapsed) : "00:00:00"}
+          {formatTime(isThisOTActive ? elapsed : 0)}
         </div>
 
         {isOtherOTActive ? (
@@ -165,15 +175,26 @@ function TimerWidget({ workOrderId, initialTime = 0 }: { workOrderId: string, in
                 Démarrer l'intervention
               </button>
             ) : (
-              <button
-                onClick={handleStop}
-                className="w-full py-4 rounded-2xl bg-rose-600 hover:bg-rose-500 text-white font-black uppercase text-xs tracking-widest transition-all flex items-center justify-center gap-3 shadow-lg shadow-rose-600/20 active:scale-95 group"
-              >
-                <div className="size-8 rounded-lg bg-rose-500/30 flex items-center justify-center group-hover:scale-110 transition-transform">
-                  <Square size={16} fill="currentColor" />
-                </div>
-                Arrêter le compteur
-              </button>
+              <div className="flex flex-col sm:flex-row gap-3">
+                <button
+                  onClick={() => handleStop(false)}
+                  className="flex-1 py-4 rounded-2xl bg-white/5 border border-white/10 hover:bg-white/10 text-white font-black uppercase text-xs tracking-widest transition-all flex items-center justify-center gap-3 shadow-lg active:scale-95 group"
+                >
+                  <div className="size-8 rounded-lg bg-slate-800 flex items-center justify-center group-hover:scale-110 transition-transform">
+                    <Pause size={16} fill="currentColor" />
+                  </div>
+                  Pause
+                </button>
+                <button
+                  onClick={() => handleStop(true)}
+                  className="flex-1 py-4 rounded-2xl bg-blue-600 hover:bg-blue-500 text-white font-black uppercase text-xs tracking-widest transition-all flex items-center justify-center gap-3 shadow-lg shadow-blue-600/20 active:scale-95 group"
+                >
+                  <div className="size-8 rounded-lg bg-blue-500/30 flex items-center justify-center group-hover:scale-110 transition-transform">
+                    <CheckCircle size={16} fill="currentColor" />
+                  </div>
+                  Terminer l'intervention
+                </button>
+              </div>
             )}
           </div>
         )}
@@ -194,18 +215,12 @@ export default function WorkOrderDetailPage({ params }: { params: Promise<{ id: 
       const results = await db.workOrders.toArray();
       const found = results.find((w: any) => String(w.id) === String(id));
 
-      // 2. If not found in cache OR found but has no parts array, fetch fresh from API
-      if (!found || found.parts === undefined) {
+      // 2. Fetch fresh if: not cached, missing parts/steps, OR it's a SAP OT with no steps (steps were just synced)
+      const isSapOtWithNoSteps = found?.sap_order_id && (!found.steps || found.steps.length === 0);
+      if (!found || found.parts === undefined || found.steps === undefined || isSapOtWithNoSteps) {
         try {
-          const res = await fetch(
-            `${typeof window !== 'undefined' ? `http://${window.location.hostname}:5000/api` : 'http://localhost:5000/api'}/work-orders/${id}`,
-            { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } }
-          );
-          if (res.ok) {
-            const fresh = await res.json();
-            await db.workOrders.put(fresh);
-            return fresh;
-          }
+          const fresh = await gmaoApi.getWorkOrder(id);
+          if (fresh) return fresh;
         } catch { }
       }
       return found;
@@ -227,20 +242,31 @@ export default function WorkOrderDetailPage({ params }: { params: Promise<{ id: 
   async function markAsDone() {
     if (updating || !order) return;
     setUpdating(true);
+
+    // 1. MISE À JOUR OPTIMISTE IMMÉDIATE → L'UI change instantanément
+    await db.workOrders.update(Number(id), { 
+      status: 'done',
+      actual_end_date: new Date().toISOString().split('T')[0]
+    });
+
     try {
       const res = await gmaoApi.updateWorkOrder(order.id, { status: 'done' });
-      // Dexie update is handled by handlePatch in api.ts
+
+      // 2. Sync complète depuis le serveur (score ML se recalcule)
+      const freshWO = await gmaoApi.getWorkOrder(id);
+      if (freshWO) await db.workOrders.put(freshWO);
 
       const updates = (res as any)._stock_updates ?? [];
       if (updates.length > 0) {
         const parts = updates.map((u: any) => `${u.part} (−${u.deducted})`).join(', ');
         toastSuccess('OT terminé — Stock mis à jour', parts);
       } else {
-        toastSuccess('OT marqué comme terminé');
+        toastSuccess('✅ OT marqué comme terminé — Score de santé recalculé');
       }
     } catch {
-      // Global interceptor handles business errors
-      console.error("Update failed");
+      // En cas d'erreur : rollback de l'optimisme
+      await db.workOrders.update(Number(id), { status: order.status, actual_end_date: order.actual_end_date });
+      toastError("Échec de la mise à jour — Réessayez");
     } finally {
       setUpdating(false);
     }
@@ -415,6 +441,18 @@ export default function WorkOrderDetailPage({ params }: { params: Promise<{ id: 
             <span>Rapport PDF</span>
           </button>
 
+          {canManage && order.status !== 'pending_deletion' && (
+            <button
+              onClick={handleDelete}
+              disabled={updating}
+              className="px-4 py-2 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-500 hover:text-rose-400 font-bold text-sm border border-rose-500/20 transition-all flex items-center gap-2"
+              title="Supprimer l'Ordre de Travail"
+            >
+              <Trash2 size={16} />
+              <span className="hidden sm:inline">Supprimer</span>
+            </button>
+          )}
+
           {/* Approval Actions for Managers */}
           {order.status === 'pending_deletion' && isManager && (
             <div className="flex items-center gap-2">
@@ -438,15 +476,7 @@ export default function WorkOrderDetailPage({ params }: { params: Promise<{ id: 
           {/* Standard Actions */}
           {order.status !== 'done' && order.status !== 'closed' && order.status !== 'pending_deletion' && (
             <div className="flex items-center gap-2">
-              {canManage && (
-                <button
-                  onClick={handleDelete}
-                  disabled={updating}
-                  className="px-4 py-2 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-500 font-bold text-sm transition-all border border-rose-500/20 active:scale-95 flex items-center gap-2"
-                >
-                  <Trash2 size={16} /> Supprimer
-                </button>
-              )}
+
               <button
                 onClick={markAsDone}
                 disabled={updating}
@@ -561,6 +591,37 @@ export default function WorkOrderDetailPage({ params }: { params: Promise<{ id: 
                         {step.description}
                       </span>
                     </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* ── DEMANDES DE PIÈCES ── */}
+            {order.parts_requests && order.parts_requests.length > 0 && (
+              <div className="mt-8 pt-8 border-t border-white/5">
+                <h3 className="text-[0.7rem] font-black text-slate-400 uppercase tracking-[0.2em] mb-4">Demandes de Pièces</h3>
+                <div className="space-y-3">
+                  {order.parts_requests.map((req: any) => (
+                    <div key={req.id} className="p-4 rounded-2xl bg-white/5 border border-white/10">
+                      <div className="flex justify-between items-center mb-2">
+                        <span className="text-[0.6rem] font-black text-slate-500 uppercase">Demande #{req.id}</span>
+                        <div className={`px-2 py-1 rounded text-[0.6rem] font-black uppercase tracking-widest ${
+                          req.status === 'pending' ? 'bg-amber-500/20 text-amber-500' :
+                          req.status === 'approved' ? 'bg-emerald-500/20 text-emerald-500' :
+                          'bg-rose-500/20 text-rose-500'
+                        }`}>
+                          {req.status === 'pending' ? 'En attente' : req.status === 'approved' ? 'Approuvée' : 'Refusée'}
+                        </div>
+                      </div>
+                      <div className="space-y-1">
+                        {req.items.map((item: any) => (
+                          <div key={item.id} className="flex justify-between items-center text-xs">
+                            <span className="text-slate-300 font-bold">{item.part_name}</span>
+                            <span className="text-slate-500 font-black">x{item.quantity_requested}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
                   ))}
                 </div>
               </div>

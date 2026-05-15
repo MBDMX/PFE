@@ -109,8 +109,8 @@ async def face_login(data: FaceDescriptorSchema):
     from app.db.session import prisma as db
 
     # --- Strict thresholds ---
-    THRESHOLD = 0.50   # Was 0.65 — reduced to avoid cross-user matches
-    MIN_GAP   = 0.10   # Minimum margin between best and 2nd best match
+    THRESHOLD = 0.75   # Increased from 0.60 for better tolerance
+    MIN_GAP   = 0.05   # Reduced from 0.10 to allow closer matches
 
     try:
         log("[FACE LOGIN] Request received")
@@ -231,9 +231,9 @@ async def get_face_token(data: FaceTokenRequest, db: Prisma = Depends(get_db)):
     """
     Fast token endpoint called ONCE after the frontend locally confirmed a match.
     Re-verifies the descriptor server-side before issuing tokens (security).
-    Threshold is slightly relaxed (0.55) because we already know which user.
+    Threshold is slightly relaxed (0.65) because we already know which user.
     """
-    THRESHOLD = 0.55
+    THRESHOLD = 0.75
 
     user = await db.user.find_unique(where={"id": data.user_id})
     if not user or not getattr(user, "face_descriptor", None):

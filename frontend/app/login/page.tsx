@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { User, Lock, Wrench, ArrowRight, Eye, EyeOff } from 'lucide-react';
 import api from '@/services/api';
 import { FaceLogin } from '@/components/FaceLogin';
+import { FaceEnroll } from '@/components/FaceEnroll';
 
 // Role → dashboard route map (read-only, never user-controlled)
 const ROLE_ROUTES: Record<string, string> = {
@@ -40,24 +41,30 @@ export default function LoginPage() {
 
   const ready = username.trim().length > 0 && password.length > 0;
 
+  const [showEnrollment, setShowEnrollment] = useState(false);
+
   async function handleLogin() {
     if (!ready || loading) return;
     setLoading(true);
     setError('');
     try {
       const res = await api.post('/auth/login', { identifier: username, password });
-      const { access_token, refresh_token } = res.data;
+      const { access_token, refresh_token, user } = res.data;
 
       // Store tokens and user info
       localStorage.setItem('token', access_token);
       if (refresh_token) localStorage.setItem('refresh_token', refresh_token);
-      localStorage.setItem('user', JSON.stringify(res.data.user));
+      localStorage.setItem('user', JSON.stringify(user));
 
-      // Decode role from JWT (backend is the source of truth)
-      const payload = JSON.parse(
-        window.atob(access_token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))
-      );
-      const route = ROLE_ROUTES[payload.role];
+      // ─── MANDATORY FACE ENROLLMENT CHECK ───
+      // If the user has no face profile, we force enrollment now
+      if (!user.has_face_id) {
+        setShowEnrollment(true);
+        return; // Don't redirect yet
+      }
+
+      // If they have a face, redirect normally
+      const route = ROLE_ROUTES[user.role];
       if (!route) throw new Error('Rôle inconnu');
       router.replace(route);
     } catch (err: any) {
@@ -106,7 +113,10 @@ export default function LoginPage() {
         </div>
 
         {/* Form */}
-        <div className="space-y-5">
+        <form 
+          onSubmit={(e) => { e.preventDefault(); handleLogin(); }}
+          className="space-y-5"
+        >
 
           {/* Username */}
           <div className="group relative">
@@ -166,7 +176,7 @@ export default function LoginPage() {
           <div className="relative pt-2">
             <div className={`absolute inset-0 bg-blue-400/30 blur-2xl rounded-full scale-90 transition-opacity duration-700 ${ready ? 'opacity-100' : 'opacity-0'}`} />
             <button
-              onClick={handleLogin}
+              type="submit"
               disabled={!ready || loading}
               className={`
                 w-full relative flex items-center justify-center gap-3 py-5 rounded-[2rem]
@@ -207,8 +217,31 @@ export default function LoginPage() {
             />
           </div>
 
-        </div>
+        </form>
       </div>
+
+      {/* Mandatory Face Enrollment Overlay */}
+      {showEnrollment && (
+        <div className="fixed inset-0 z-[1000] flex flex-col items-center justify-center bg-slate-950/95 backdrop-blur-3xl animate-in fade-in duration-700 p-4">
+          <div className="w-full max-w-2xl bg-[#112240] rounded-[3rem] border border-white/10 p-8 shadow-2xl overflow-hidden relative">
+            <FaceEnroll />
+            
+            <div className="mt-4 flex justify-center border-t border-white/5 pt-6">
+              <button 
+                onClick={() => {
+                  const userStr = localStorage.getItem('user');
+                  const user = userStr ? JSON.parse(userStr) : null;
+                  const role = user?.role ?? 'technician';
+                  window.location.href = ROLE_ROUTES[role] || '/dashboard';
+                }}
+                className="px-8 py-3 bg-white/5 border border-white/10 rounded-2xl text-[0.6rem] font-bold text-white/40 uppercase tracking-widest hover:bg-white/10 hover:text-white transition-all"
+              >
+                Accéder au Dashboard
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

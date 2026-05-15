@@ -1,6 +1,7 @@
 'use client';
 import { useState, useEffect, useRef } from 'react';
 import { Clock, CheckCircle, XCircle, Package, Printer, Search, Filter, AlertTriangle } from 'lucide-react';
+import { SmartPartImage } from '../../../../components/stock/SmartPartImage';
 import { gmaoApi } from '../../../../services/api';
 import { useToast } from '../../../../components/ui/toast';
 
@@ -10,6 +11,7 @@ interface RequestItem {
     part_name: string;
     quantity_requested: number;
     quantity_approved: number | null;
+    stock_id?: number | null;
 }
 
 interface PartsRequest {
@@ -93,24 +95,109 @@ export default function RequestManager() {
         const printWindow = window.open('', '_blank');
         if (!printWindow) return;
         printWindow.document.write(`
-            <!DOCTYPE html><html><head><title>Bon de Sortie #${selectedReq?.id}</title>
+            <!DOCTYPE html><html><head><title>BON DE SORTIE SAP PR-${selectedReq?.id}</title>
+            <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;700;900&display=swap" rel="stylesheet">
             <style>
-                body { font-family: 'Segoe UI', Arial, sans-serif; padding: 40px; color: #1a1a1a; }
-                .header { display: flex; justify-content: space-between; border-bottom: 2px solid #333; padding-bottom: 16px; margin-bottom: 24px; }
-                .logo { font-weight: 900; font-size: 20px; color: #2563eb; }
-                table { width: 100%; border-collapse: collapse; margin-top: 16px; }
-                th { background: #f3f4f6; text-align: left; padding: 10px 12px; border: 1px solid #e5e7eb; font-size: 11px; text-transform: uppercase; }
-                td { padding: 10px 12px; border: 1px solid #e5e7eb; font-size: 13px; }
-                .meta { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 20px; font-size: 13px; }
-                .footer { margin-top: 60px; display: flex; justify-content: space-between; }
-                .sig { border-top: 1px solid #ccc; width: 180px; text-align: center; padding-top: 8px; font-size: 11px; }
+                body { font-family: 'Outfit', sans-serif; padding: 50px; color: #0f172a; line-height: 1.5; }
+                .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 4px solid #2563eb; padding-bottom: 20px; margin-bottom: 30px; }
+                .logo-area { display: flex; flex-direction: column; }
+                .logo-main { font-weight: 900; font-size: 28px; color: #2563eb; letter-spacing: -1px; }
+                .logo-sub { font-size: 10px; font-weight: 700; color: #64748b; text-transform: uppercase; letter-spacing: 2px; }
+                .doc-type { text-align: right; }
+                .doc-type h1 { margin: 0; font-size: 24px; font-weight: 900; color: #0f172a; }
+                .doc-ref { font-size: 14px; font-weight: 700; color: #64748b; }
+                
+                .info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 30px; background: #f8fafc; padding: 20px; border-radius: 12px; border: 1px solid #e2e8f0; }
+                .info-item { display: flex; flex-direction: column; }
+                .info-label { font-size: 9px; font-weight: 800; color: #94a3b8; text-transform: uppercase; letter-spacing: 1px; }
+                .info-value { font-size: 14px; font-weight: 700; color: #1e293b; }
+
+                table { width: 100%; border-collapse: collapse; margin: 30px 0; }
+                th { background: #0f172a; color: white; text-align: left; padding: 12px 15px; font-size: 11px; text-transform: uppercase; letter-spacing: 1px; }
+                td { padding: 12px 15px; border-bottom: 1px solid #e2e8f0; font-size: 13px; font-weight: 500; }
+                .col-ref { font-family: monospace; font-weight: 700; color: #2563eb; }
+                .col-qty { font-weight: 900; font-size: 16px; text-align: center; }
+                
+                .footer-sig { margin-top: 80px; display: grid; grid-template-columns: 1fr 1fr; gap: 100px; }
+                .signature-box { border-top: 2px solid #0f172a; padding-top: 10px; text-align: center; }
+                .sig-label { font-size: 10px; font-weight: 900; text-transform: uppercase; color: #0f172a; }
+                .sig-hint { font-size: 9px; color: #94a3b8; font-style: italic; margin-top: 50px; }
+                
+                @media print {
+                    body { padding: 20px; }
+                    .no-print { display: none; }
+                }
             </style></head><body>
-            ${printRef.current.innerHTML}
+            <div class="header">
+                <div class="logo-area">
+                    <span class="logo-main">GMAO PRO</span>
+                    <span class="logo-sub">Excellence Digitale Industrielle</span>
+                </div>
+                <div class="doc-type">
+                    <h1>BON DE SORTIE STOCK</h1>
+                    <div class="doc-ref">PR-${selectedReq?.id} • SAP ECC 6.0</div>
+                </div>
+            </div>
+
+            <div class="info-grid">
+                <div class="info-item">
+                    <span class="info-label">Ordre de Travail SAP</span>
+                    <span class="info-value">${selectedReq?.work_order_sap_id}</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Date de Validation</span>
+                    <span class="info-value">${selectedReq?.approved_at || new Date().toLocaleString()}</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Technicien Demandeur</span>
+                    <span class="info-value">${selectedReq?.requester_name}</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Désignation Intervention</span>
+                    <span class="info-value">${selectedReq?.work_order_title}</span>
+                </div>
+            </div>
+
+            <table>
+                <thead>
+                    <tr>
+                        <th>Référence Article</th>
+                        <th>Désignation</th>
+                        <th style="text-align: center;">Quantité</th>
+                        <th>Unité</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${selectedReq?.items.map(it => `
+                        <tr>
+                            <td class="col-ref">${it.part_code}</td>
+                            <td>${it.part_name}</td>
+                            <td class="col-qty">${it.quantity_approved || it.quantity_requested}</td>
+                            <td>PCS</td>
+                        </tr>
+                    `).join('')}
+                </tbody>
+            </table>
+
+            <div class="footer-sig">
+                <div class="signature-box">
+                    <div class="sig-label">VISA MAGASINIER (LIVRAISON)</div>
+                    <div class="sig-hint">Nom, Prénom & Cachet Officiel</div>
+                </div>
+                <div class="signature-box">
+                    <div class="sig-label">VISA TECHNICIEN (RÉCEPTION)</div>
+                    <div class="sig-hint">Signature du Responsable Travaux</div>
+                </div>
+            </div>
+
+            <div style="margin-top: 40px; font-size: 8px; color: #cbd5e1; text-align: center; border-top: 1px solid #f1f5f9; padding-top: 10px;">
+                Document généré via GMAO PRO RPA System - Traçabilité SAP assurée - Page 1/1
+            </div>
+
+            <script>window.onload = () => { window.print(); setTimeout(() => window.close(), 500); }</script>
             </body></html>
         `);
         printWindow.document.close();
-        printWindow.focus();
-        setTimeout(() => { printWindow.print(); printWindow.close(); }, 500);
     }
 
     const filtered = filter === 'all' ? requests : requests.filter(r => r.status === filter);
@@ -213,9 +300,12 @@ export default function RequestManager() {
                                      {selectedReq.items.map(item => (
                                          <div key={item.id} className="p-3 rounded-xl bg-white/5 border border-white/5 flex items-center justify-between group hover:border-amber-500/30 transition-all">
                                              <div className="flex items-center gap-3">
-                                                 <div className="size-8 rounded-lg bg-slate-800 flex items-center justify-center text-amber-500 border border-white/5 font-mono text-[0.6rem] font-bold">
-                                                     {item.part_code}
-                                                 </div>
+                                                 <SmartPartImage 
+                                                     partId={item.stock_id || 0} 
+                                                     partName={item.part_name} 
+                                                     icon="package" 
+                                                     className="size-10 rounded-lg shrink-0" 
+                                                 />
                                                  <div className="text-xs font-bold text-slate-200">{item.part_name}</div>
                                              </div>
                                              <div className="text-lg font-black text-white shrink-0">x{item.quantity_requested}</div>

@@ -46,29 +46,31 @@ async function handleGet(endpoint: string, table?: any) {
     const isOnline = typeof window !== 'undefined' && navigator.onLine;
     const url = endpoint.includes('?') ? `${endpoint}&t=${Date.now()}` : `${endpoint}?t=${Date.now()}`;
 
-    // 1. ONLINE: Network-First
+    // 1. ONLINE: Network-First (with short timeout)
     if (isOnline) {
         try {
-            const res = await api.get(url);
+            // Timeout court pour ne pas bloquer l'UI si le réseau est instable
+            const res = await api.get(url, { timeout: 1500 });
             if (table && Array.isArray(res.data)) {
                 // SYNC DATA: Update existing, add new, remove deleted
                 await db.transaction('rw', table, async () => {
                     const freshData = res.data;
+                    const allKeys = await table.toCollection().primaryKeys();
                     const freshIds = freshData.map((x: any) => x.id).filter(Boolean);
                     
-                    // Prune deleted items
-                    const allKeys = await table.toCollection().primaryKeys();
-                    const keysToDelete = allKeys.filter((k: any) => !freshIds.includes(k));
-                    if (keysToDelete.length > 0) await table.bulkDelete(keysToDelete);
-                    
-                    // Update/Add
+                    const localCount = await table.count();
+                    if (freshData.length === 0 && localCount > 5) {
+                        // Protection contre les réponses vides accidentelles
+                    } else {
+                        const keysToDelete = allKeys.filter((k: any) => !freshIds.includes(k));
+                        if (keysToDelete.length > 0) await table.bulkDelete(keysToDelete);
+                    }
                     await table.bulkPut(freshData);
                 });
             }
             return res.data;
         } catch (err) {
-            console.warn(`GET ${endpoint} failed, falling back to cache...`, err);
-            // Fall through to cache
+            // console.warn(`GET ${endpoint} failed, falling back to cache...`);
         }
     }
 
@@ -87,7 +89,8 @@ async function handlePost(endpoint: string, data: any, actionType: OfflineAction
     // ONLINE: try to send directly — only queue on failure
     if (isOnline) {
         try {
-            const res = await api.post(endpoint, data);
+            // Timeout de 2s : si Internet est trop lent, on bascule en offline
+            const res = await api.post(endpoint, data, { timeout: 2000 });
             const postResult = res.data;
 
             // ✅ Async cache refresh — do NOT let this failure affect the POST result
@@ -141,6 +144,7 @@ async function handlePost(endpoint: string, data: any, actionType: OfflineAction
 
     // OFFLINE or failed: add to sync queue
     if (typeof window !== 'undefined') {
+        console.log(`📡 Queuing ${actionType} for offline sync...`);
         await db.syncQueue.add({
             type: actionType,
             endpoint,
@@ -149,17 +153,16 @@ async function handlePost(endpoint: string, data: any, actionType: OfflineAction
             timestamp: Date.now(),
             status: 'pending'
         });
+        // SIGNAL GLOBAL pour forcer la Sidebar à se mettre à jour
+        window.dispatchEvent(new Event('sync-queue-updated'));
     }
-    return { ...data, id: Date.now(), offline: true, message: 'Action enregistrée' };
+    return { ...data, id: Date.now(), offline: true, message: 'Action enregistrée hors-ligne', success: true };
 }
 
 async function handlePatch(endpoint: string, data: any, actionType: OfflineAction['type']) {
-    const isOnline = typeof window !== 'undefined' && navigator.onLine;
-
-    // ONLINE: try to send directly — only queue on failure
-    if (isOnline) {
-        try {
-            const res = await api.patch(endpoint, data);
+    // On essaie toujours, le timeout de 2s s'occupe du reste
+    try {
+        const res = await api.patch(endpoint, data, { timeout: 2000 });
             // ✅ Update Dexie cache: PUT the FULL server response (includes parts, steps)
             if (endpoint.includes('/work-orders/')) {
                 const woId = parseInt(endpoint.split('/work-orders/')[1]);
@@ -172,34 +175,29 @@ async function handlePatch(endpoint: string, data: any, actionType: OfflineActio
             console.warn(`PATCH failed, queuing ${actionType}...`, err);
             // Fall through to queue
         }
-    }
 
-    // OFFLINE or failed: add to sync queue
-    if (typeof window !== 'undefined') {
-        await db.syncQueue.add({
-            type: actionType,
-            endpoint,
-            method: 'PATCH',
-            payload: data,
-            timestamp: Date.now(),
-            status: 'pending'
-        });
-    }
-    return { ...data, offline: true };
+        // OFFLINE or failed: add to sync queue
+        if (typeof window !== 'undefined') {
+            await db.syncQueue.add({
+                type: actionType,
+                endpoint,
+                method: 'PATCH',
+                payload: data,
+                timestamp: Date.now(),
+                status: 'pending'
+            });
+        }
+        return { ...data, offline: true };
 }
 
 async function handleDelete(endpoint: string, actionType: OfflineAction['type']) {
-    const isOnline = typeof window !== 'undefined' && navigator.onLine;
-
-    // ONLINE: try to send directly — only queue on failure
-    if (isOnline) {
-        try {
-            const res = await api.delete(endpoint);
-            return res.data;
-        } catch (err) {
-            console.warn(`DELETE failed, queuing ${actionType}...`, err);
-            // Fall through to queue
-        }
+    // On essaie toujours l'envoi direct, le timeout de 2s gère le reste
+    try {
+        const res = await api.delete(endpoint, { timeout: 2000 });
+        return res.data;
+    } catch (err) {
+        console.warn(`DELETE failed, queuing ${actionType}...`, err);
+        // Fall through to queue
     }
 
     // OFFLINE or failed: add to sync queue
@@ -221,27 +219,40 @@ async function handleDelete(endpoint: string, actionType: OfflineAction['type'])
 // ────────────────────────────────────────────
 
 async function processSyncQueue() {
-    if (typeof window === 'undefined' || !navigator.onLine) return;
+    if (typeof window === 'undefined') return;
     
     const queue = await db.syncQueue
         .filter(a => a.status === 'pending' || a.status === 'error')
         .toArray();
     if (queue.length === 0) return;
 
+    // Clés internes à ne jamais envoyer au backend
+    const INTERNAL_KEYS = ['offline', '_stock_updates', 'parts', 'steps', 'parts_requests', 
+                           'created_at', 'updated_at', 'sap_order_id', 'technician', 'machine'];
+
     for (const action of queue) {
         try {
             await db.syncQueue.update(action.id!, { status: 'syncing' });
             
+            // Nettoyer le payload : supprimer les clés internes avant envoi
+            const cleanPayload = action.payload ? Object.fromEntries(
+                Object.entries(action.payload).filter(([key]) => !INTERNAL_KEYS.includes(key))
+            ) : {};
+
             let res;
-            if (action.method === 'POST') res = await api.post(action.endpoint, action.payload);
-            else if (action.method === 'PATCH') res = await api.patch(action.endpoint, action.payload);
+            if (action.method === 'POST') res = await api.post(action.endpoint, cleanPayload);
+            else if (action.method === 'PATCH') res = await api.patch(action.endpoint, cleanPayload);
             else if (action.method === 'DELETE') res = await api.delete(action.endpoint);
             
             await db.syncQueue.delete(action.id!);
-            console.log(`Sync Success: ${action.type} -> ${action.endpoint}`);
+            console.log(`✅ Sync Success: ${action.type} -> ${action.endpoint}`);
         } catch (err: any) {
             if (err.response?.status === 404) {
                 console.warn(`🗑️ Skipping deleted resource: ${action.endpoint}`);
+                await db.syncQueue.delete(action.id!);
+            } else if (err.response?.status === 422) {
+                // 422 = le payload ne correspond pas au schéma backend → on supprime pour éviter la boucle infinie
+                console.warn(`⚠️ 422 on ${action.endpoint} — payload incompatible, dropping action`);
                 await db.syncQueue.delete(action.id!);
             } else {
                 console.error(`Sync Failure for ${action.id}:`, err);
@@ -263,7 +274,7 @@ if (typeof window !== 'undefined') {
 }
 
 async function syncMasterData() {
-    if (typeof window === 'undefined' || !navigator.onLine) return;
+    if (typeof window === 'undefined') return;
     
     // Skip sync if user is not authenticated
     const token = localStorage.getItem('token');
@@ -360,6 +371,7 @@ async function cacheStockImages(items: any[]) {
 // ────────────────────────────────────────────
 
 export const gmaoApi = {
+    get: (url: string) => handleGet(url),
     getMachines: () => handleGet('/machines', db.machines),
     getStock: () => handleGet('/stock', db.stock),
     syncStockFromSap: async () => {
@@ -369,31 +381,20 @@ export const gmaoApi = {
         await handleGet('/stock', db.stock);
         return res.data;
     },
-    syncImages: async () => {
+    syncImages: async (force: boolean = false) => {
         // Force l'assignation d'images sur toutes les pièces existantes
-        const res = await api.post('/stock/sync-images', {});
+        const res = await api.post(`/stock/sync-images?force=${force}`, {});
         await handleGet('/stock', db.stock);
         return res.data;
     },
     getWorkOrders: () => handleGet('/work-orders', db.workOrders),
+    getWorkOrder: (id: number | string) => handleGet(`/work-orders/${id}`, db.workOrders),
     getStats: () => handleGet('/stats'),
     
-    getWorkOrder: async (id: string | number) => {
-        try {
-            const res = await api.get(`/work-orders/${id}`);
-            return res.data;
-        } catch (err) {
-            // Fallback to local search if specific WO fetch fails
-            const local = await db.workOrders.get({ id: Number(id) });
-            if (local) return local;
-            throw err;
-        }
-    },
-
     createWorkOrder: (data: any) => handlePost('/work-orders', data, 'CREATE_WORK_ORDER'),
     
-    orderStock: async (itemId: number, quantity: number) => {
-        return handlePost('/stock/order', { itemId, quantity }, 'UPDATE_WORK_ORDER');
+    orderStock: async (itemId: number, quantity: number, supplierInfo: string = "") => {
+        return handlePost(`/stock/${itemId}/order-sap`, { quantity, supplier_info: supplierInfo }, 'UPDATE_WORK_ORDER');
     },
 
     updateWorkOrder: (id: number | string, data: any) => handlePatch(`/work-orders/${id}`, data, 'UPDATE_WORK_ORDER'),
@@ -415,11 +416,25 @@ export const gmaoApi = {
     triggerMaintenance: (machineId: number) => 
         handlePost(`/machines/${machineId}/trigger-maintenance`, {}, 'CREATE_WORK_ORDER'),
 
+    getMachineFinancials: (machineId: number) => 
+        handleGet(`/machines/${machineId}/financials`),
+
+    transferStock: async (data: { item_code: string, quantity: number, from_wh: string, to_wh: string }) => {
+        return handlePost('/stock/transfer-sap', data, 'CREATE_STOCK_MOVEMENT');
+    },
+
     getReliabilityKpis: () => handleGet('/kpi-reliability'),
     getTechnicians: () => handleGet('/technicians', db.technicians),
-    syncData: async () => {
-        await processSyncQueue();
-        await syncMasterData();
+    _isSyncingInternal: false,
+    syncData: async function() {
+        if (this._isSyncingInternal) return;
+        this._isSyncingInternal = true;
+        try {
+            await processSyncQueue();
+            await syncMasterData();
+        } finally {
+            this._isSyncingInternal = false;
+        }
     },
 
     toggleStep: (stepId: number, isDone: boolean) => 
@@ -497,12 +512,13 @@ export const gmaoApi = {
     
     // BIOMETRIC AUTH
     enrollFace: (descriptor: number[]) => api.post('/face/enroll', { descriptor }),
+    enrollFaceMulti: (descriptors: number[][]) => api.post('/face/enroll-multi', { descriptors }),
     faceLogin: (descriptor: number[]) => api.post('/face/login', { descriptor }),
 
     // TIME TRACKING
     getTimerActive: () => handleGet('/technician/timer/active'),
     startTimer: (woId: number | string) => handlePost(`/work-orders/${woId}/timer/start`, {}, 'TIMER_START'),
-    stopTimer: (woId: number | string) => handlePost(`/work-orders/${woId}/timer/stop`, {}, 'TIMER_STOP'),
+    stopTimer: (woId: number | string, data: any = {}) => handlePost(`/work-orders/${woId}/timer/stop`, data, 'TIMER_STOP'),
 
     // SYSTEM ADMINISTRATION
     resetSystem: () => handlePost('/system/reset', {}, 'RESET_SYSTEM'),

@@ -8,6 +8,7 @@ interface MLMachineHealth {
     name: string;
     score: number;
     risk: 'High' | 'Medium' | 'Low';
+    human_summary?: string;
 }
 
 interface MLSummary {
@@ -25,7 +26,9 @@ export default function MLHealthWidget() {
         api.get('/predictive/machine-health')
             .then(res => {
                 if (res.data?.status === 'success') {
-                    setData(res.data.data.slice(0, 5)); // Top 5
+                    // Trier d'abord TOUTE la liste par score croissant (pires en haut)
+                    const sorted = [...res.data.data].sort((a, b) => a.score - b.score);
+                    setData(sorted.slice(0, 5)); // Prendre les 5 pires après le tri
                     setSummary(res.data.summary);
                 }
             })
@@ -78,24 +81,34 @@ export default function MLHealthWidget() {
                 <div className="text-[0.6rem] font-black text-slate-600 uppercase tracking-[0.2em] mb-4">Équipements les plus instables</div>
                 
                 {data.sort((a,b) => a.score - b.score).map((m) => (
-                    <div key={m.id} className="flex items-center justify-between p-3 rounded-xl bg-white/5 border border-white/5 hover:bg-white/10 hover:border-blue-500/20 transition-all cursor-pointer group/item">
-                        <div className="flex items-center gap-3">
-                            <div className={`size-2 rounded-full shadow-[0_0_8px] ${m.risk === 'High' ? 'bg-rose-500 shadow-rose-500/40' : (m.risk === 'Medium' ? 'bg-amber-500 shadow-amber-500/40' : 'bg-emerald-500 shadow-emerald-500/40')}`} />
-                            <div>
-                                <div className="text-xs font-bold text-white uppercase tracking-tight group-hover/item:text-blue-400 transition-colors">{m.name}</div>
-                                <div className="text-[0.6rem] font-bold text-slate-500 uppercase tracking-widest">Risque {m.risk}</div>
+                    <div key={m.id} className="p-3 rounded-xl bg-white/5 border border-white/5 hover:bg-white/10 hover:border-blue-500/20 transition-all cursor-pointer group/item">
+                        <div className="flex items-center justify-between mb-2">
+                            <div className="flex items-center gap-3">
+                                <div className={`size-2 rounded-full shadow-[0_0_8px] ${m.risk === 'High' ? 'bg-rose-500 shadow-rose-500/40' : (m.risk === 'Medium' ? 'bg-amber-500 shadow-amber-400/40' : 'bg-emerald-500 shadow-emerald-500/40')}`} />
+                                <div>
+                                    <div className="text-xs font-bold text-white uppercase tracking-tight group-hover/item:text-blue-400 transition-colors">{m.name}</div>
+                                    <div className="text-[0.6rem] font-bold text-slate-500 uppercase tracking-widest">Risque {m.risk}</div>
+                                </div>
                             </div>
-                        </div>
-                        <div className="flex items-center gap-3">
                             <div className="text-right">
                                 <div className={`text-xs font-black ${m.score > 70 ? 'text-emerald-400' : (m.score > 40 ? 'text-amber-400' : 'text-rose-400')}`}>
                                     {m.score}%
                                 </div>
-                                <div className="h-1 w-12 bg-white/10 rounded-full mt-1 overflow-hidden">
-                                    <div className={`h-full rounded-full ${m.score > 70 ? 'bg-emerald-500' : (m.score > 40 ? 'bg-amber-500' : 'bg-rose-500')}`} style={{ width: `${m.score}%` }} />
-                                </div>
                             </div>
-                            <ChevronRight size={14} className="text-slate-600 group-hover/item:translate-x-1 transition-transform" />
+                        </div>
+                        
+                        {/* IA Explanation - XAI Summary */}
+                        {m.human_summary && (
+                            <div className="bg-blue-500/5 rounded-lg p-2 border border-blue-500/10 mb-2">
+                                <p className="text-[0.65rem] text-blue-300/80 leading-relaxed italic">
+                                    <span className="font-bold mr-1">IA Analytique:</span>
+                                    {m.human_summary}
+                                </p>
+                            </div>
+                        )}
+
+                        <div className="h-1 w-full bg-white/5 rounded-full overflow-hidden">
+                            <div className={`h-full rounded-full transition-all duration-1000 ${m.score > 70 ? 'bg-emerald-500' : (m.score > 40 ? 'bg-amber-500' : 'bg-rose-500')}`} style={{ width: `${m.score}%` }} />
                         </div>
                     </div>
                 ))}
