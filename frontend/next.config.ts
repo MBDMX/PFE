@@ -1,7 +1,15 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  output: "standalone", // required for Docker multi-stage build
+  output: "standalone",
+  async rewrites() {
+    return [
+      {
+        source: '/static/:path*',
+        destination: 'http://localhost:5000/static/:path*',
+      },
+    ];
+  },
 };
 
 export default nextConfig;

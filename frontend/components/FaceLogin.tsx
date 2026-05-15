@@ -1,7 +1,7 @@
 'use client';
 
 import { useRef, useState, useEffect } from 'react';
-import axios from 'axios';
+import api from '../services/api';
 import { Camera, X, Loader2, UserCheck, ShieldCheck, AlertCircle } from 'lucide-react';
 import * as faceapi from 'face-api.js';
 import { useToast } from './ui/toast';
@@ -20,12 +20,11 @@ interface FaceLoginProps {
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
-const API_BASE         = 'http://localhost:5000/api';
 const MODEL_URL        = '/models';
-const MATCH_THRESHOLD  = 0.50;  // Local matching threshold (face-api FaceMatcher)
-const REQUIRED_HITS    = 2;     // Must match same user 2× in a row before login
-const SCAN_INTERVAL_MS = 500;   // Scan every 500 ms
-const MIN_CONFIDENCE   = 0.65;  // Face detection confidence
+const MATCH_THRESHOLD  = 0.75;  // Local matching threshold (was 0.70)
+const REQUIRED_HITS    = 1;     // Just 1 hit is enough now for maximum speed
+const SCAN_INTERVAL_MS = 100;   // Scan every 100 ms - INSTANT
+const MIN_CONFIDENCE   = 0.50;  // Face detection confidence (relaxed for speed)
 
 // ─── Models singleton (loaded once for the whole session) ─────────────────────
 let modelsReady = false;
@@ -60,11 +59,22 @@ export const FaceLogin = ({ onSuccess }: FaceLoginProps) => {
         setStream(null);
     }
 
+    // ─── Preload on mount ─────────────────────────────────────────────────────
+    useEffect(() => {
+        const preload = async () => {
+            try {
+                await ensureModels();
+                const { data: profiles } = await api.get<FaceProfile[]>('/face/descriptors');
+                profilesRef.current = profiles;
+            } catch (err) { console.error('Preload failed', err); }
+        };
+        preload();
+    }, []);
+
     // ── Open scanner ──────────────────────────────────────────────────────────
     const openScanner = async () => {
         setIsOpen(true);
         setStatus('loading');
-        setMessage('Chargement de l\'IA...');
 
         try {
             // navigator.mediaDevices is only available in secure contexts (HTTPS or localhost)
@@ -75,30 +85,27 @@ export const FaceLogin = ({ onSuccess }: FaceLoginProps) => {
             }
 
             // 1. Load AI models (cached after first load)
+            // Models and profiles are likely already loaded via useEffect
             await ensureModels();
+            if (profilesRef.current.length === 0) {
+                const { data: profiles } = await api.get<FaceProfile[]>('/face/descriptors');
+                profilesRef.current = profiles;
+            }
 
-            // 2. Fetch all face profiles from server (ONE request for the whole session)
-            setMessage('Chargement des profils...');
-            const { data: profiles } = await axios.get<FaceProfile[]>(`${API_BASE}/face/descriptors`);
-            profilesRef.current = profiles;
-
-            if (profiles.length === 0) {
+            if (profilesRef.current.length === 0) {
                 setStatus('error');
                 setMessage('Aucun profil facial enregistré');
                 return;
             }
 
-            // 3. Build FaceMatcher from all profiles (client-side, no network)
-            const labeled = profiles.map(p =>
+            const labeled = profilesRef.current.map(p =>
                 new faceapi.LabeledFaceDescriptors(
-                    String(p.id),  // label = user id
+                    String(p.id),
                     p.descriptors.map(d => new Float32Array(d))
                 )
             );
             matcherRef.current = new faceapi.FaceMatcher(labeled, MATCH_THRESHOLD);
 
-            // 4. Start camera
-            setMessage('Activation de la caméra...');
             const s = await navigator.mediaDevices.getUserMedia({
                 video: { width: 640, height: 480, facingMode: 'user' }
             });
@@ -106,12 +113,10 @@ export const FaceLogin = ({ onSuccess }: FaceLoginProps) => {
             if (videoRef.current) videoRef.current.srcObject = s;
 
             setStatus('scanning');
-            setMessage('Placez votre visage dans le cadre');
+            setMessage('Scanner actif');
         } catch (err: any) {
-            console.error('FaceLogin open error:', err);
-            toastError('Erreur', err?.message ?? 'Impossible de démarrer le scanner');
+            toastError('Erreur', 'Impossible de démarrer le scanner');
             setStatus('error');
-            setMessage('Erreur de démarrage');
         }
     };
 
@@ -131,21 +136,24 @@ export const FaceLogin = ({ onSuccess }: FaceLoginProps) => {
         let hitCount    = 0;
         let lastUserId: string | null = null;
         let lastDescriptor: Float32Array | null = null;
+        let hasBlinked  = false; // Liveness check
+
+        const getEAR = (eye: faceapi.FaceLandmarks68['getLeftEye' | 'getRightEye']) => {
+            const p1 = eye[0], p2 = eye[1], p3 = eye[2], p4 = eye[3], p5 = eye[4], p6 = eye[5];
+            const dist = (a: faceapi.Point, b: faceapi.Point) => Math.sqrt((a.x-b.x)**2 + (a.y-b.y)**2);
+            return (dist(p2, p6) + dist(p3, p5)) / (2 * dist(p1, p4));
+        };
 
         const scan = async () => {
             if (!active || !videoRef.current || !matcherRef.current) return;
             if (videoRef.current.readyState < 2) {
-                if (active) setTimeout(scan, 200);
+                if (active) setTimeout(scan, 150);
                 return;
             }
 
             try {
-                // Detect face + compute descriptor (all in-browser, no network)
                 const det = await faceapi
-                    .detectSingleFace(
-                        videoRef.current,
-                        new faceapi.SsdMobilenetv1Options({ minConfidence: MIN_CONFIDENCE })
-                    )
+                    .detectSingleFace(videoRef.current, new faceapi.SsdMobilenetv1Options({ minConfidence: MIN_CONFIDENCE }))
                     .withFaceLandmarks()
                     .withFaceDescriptor();
 
@@ -154,41 +162,54 @@ export const FaceLogin = ({ onSuccess }: FaceLoginProps) => {
                     return;
                 }
 
-                // Match against all profiles locally — zero network latency
+                // --- Blink Detection (Liveness) ---
+                const leftEAR = getEAR(det.landmarks.getLeftEye());
+                const rightEAR = getEAR(det.landmarks.getRightEye());
+                const ear = (leftEAR + rightEAR) / 2;
+                
+                if (ear < 0.26) { // Seuil de clignement plus sensible
+                    hasBlinked = true;
+                }
+
+                // Match locally
                 const result = matcherRef.current.findBestMatch(det.descriptor);
 
                 if (result.label === 'unknown') {
                     hitCount    = 0;
                     lastUserId  = null;
-                    setMessage('Visage non reconnu — repositionnez-vous');
+                    setMessage('Visage non reconnu');
                     if (active) setTimeout(scan, SCAN_INTERVAL_MS);
                     return;
                 }
 
-                // Got a match — require REQUIRED_HITS consecutive confirmations
                 if (result.label === lastUserId) {
                     hitCount++;
                 } else {
-                    hitCount       = 1;
-                    lastUserId     = result.label;
+                    hitCount = 1;
+                    lastUserId = result.label;
                     lastDescriptor = det.descriptor;
                 }
 
-                const profile = profilesRef.current.find(p => String(p.id) === result.label);
-                const displayName = profile?.name ?? result.label;
-
                 if (hitCount < REQUIRED_HITS) {
-                    setMessage(`Identification... (${hitCount}/${REQUIRED_HITS})`);
+                    setMessage(`Analyse... (${hitCount}/${REQUIRED_HITS})`);
                     if (active) setTimeout(scan, SCAN_INTERVAL_MS);
                     return;
                 }
 
-                // ✅ Confirmed — ask server for tokens (1 single request total)
-                active = false; // Stop the loop
-                setMessage(`Vérification de ${displayName}...`);
+                // Check liveness before proceeding
+                if (!hasBlinked) {
+                    setMessage('CLIGNEZ DES YEUX POUR VALIDER');
+                    if (active) setTimeout(scan, 200);
+                    return;
+                }
+
+                // ✅ Confirmed + Alive
+                active = false;
+                const profile = profilesRef.current.find(p => String(p.id) === result.label);
+                setMessage(`Identification de ${profile?.name || 'utilisateur'}...`);
 
                 try {
-                    const { data } = await axios.post(`${API_BASE}/face/token`, {
+                    const { data } = await api.post('/face/token', {
                         user_id:    parseInt(result.label),
                         descriptor: Array.from(lastDescriptor!),
                     });
@@ -199,7 +220,7 @@ export const FaceLogin = ({ onSuccess }: FaceLoginProps) => {
                         localStorage.setItem('token', data.access_token);
                         if (data.refresh_token) localStorage.setItem('refresh_token', data.refresh_token);
                         localStorage.setItem('user', JSON.stringify(data.user));
-                        setTimeout(() => { onSuccess(data.user); closeScanner(); }, 1400);
+                        setTimeout(() => { onSuccess(data.user); closeScanner(); }, 300);
                     }
                 } catch (tokenErr: any) {
                     const detail = tokenErr.response?.data?.detail ?? 'Erreur de vérification';
@@ -324,12 +345,14 @@ export const FaceLogin = ({ onSuccess }: FaceLoginProps) => {
                     <div className="mt-10 flex flex-col items-center gap-3">
                         <div className="flex items-center gap-3">
                             <div className={`size-3 rounded-full transition-colors duration-300
-                                ${status === 'scanning' ? 'bg-blue-500 animate-pulse' :
+                                ${status === 'scanning' ? (message === 'CLIGNEZ DES YEUX POUR VALIDER' ? 'bg-amber-500 animate-bounce' : 'bg-blue-500 animate-pulse') :
                                   status === 'success'  ? 'bg-emerald-500' :
                                   status === 'error'    ? 'bg-red-500' :
                                   'bg-slate-700'}`}
                             />
-                            <span className="text-sm font-black uppercase tracking-[0.3em] text-slate-400">{message}</span>
+                            <span className={`text-sm font-black uppercase tracking-[0.3em] transition-colors duration-300 ${message === 'CLIGNEZ DES YEUX POUR VALIDER' ? 'text-amber-400' : 'text-slate-400'}`}>
+                                {message}
+                            </span>
                         </div>
                         <p className="text-[0.6rem] text-slate-600 font-bold uppercase tracking-widest">GMAO PRO — Session Biométrique Sécurisée</p>
                     </div>

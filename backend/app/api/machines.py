@@ -153,24 +153,74 @@ async def trigger_preventive_maintenance(
         }
     )
     
-    # Auto-generate a preventive Work Order
-    last_id = await db.workorder.count() + 1056
+    # Auto-generate a preventive Work Order and SYNC to SAP
+    today_str = today.isoformat()
+    title = f"Maintenance Préventive - {machine.name}"
+    
+    # 1. Create in SAP first to get a DocEntry/ID if possible
+    sap_res = {}
+    try:
+        sap_res = sap_client.create_maintenance_order({
+            "title": title,
+            "equipment_id": machine.reference, # SAP needs the reference Code, not the local ID
+            "type": "preventive"
+        })
+    except Exception as e:
+        print(f"⚠️ SAP Sync failed during trigger: {e}")
+
+    sap_id = sap_res.get("DocEntry") or sap_res.get("U_MONumber") or f"PM-LOC-{machine.id}"
+
+    # 2. Create local WorkOrder
     await db.workorder.create(
         data={
-            "sap_order_id": f"PM-{last_id}",
-            "title": f"Maintenance Préventive - {machine.name}",
+            "sap_order_id": str(sap_id),
+            "title": title,
             "type": "preventive",
             "priority": "medium",
             "status": "open",
-            "equipment_id": machine_id,
-            "description": f"Intervention préventive automatique générée le {today.isoformat()}"
+            "equipment_id": str(machine_id),
+            "planned_start_date": next_m.isoformat(), # On ajoute la date ici !
+            "description": f"Intervention préventive automatique générée le {today_str}"
         }
     )
     
-    return {"status": "success", "message": "Maintenance préventive déclenchée et OT créé."}
+    return {
+        "status": "success", 
+        "message": "Maintenance préventive déclenchée et synchronisée avec SAP.",
+        "sap_order_id": sap_id
+    }
 
 @router.get("/{machine_id}/work-orders", response_model=List[WorkOrderSchema])
 async def get_machine_work_orders(machine_id: int, db: Prisma = Depends(get_db)):
     """Returns all work orders for a specific machine."""
     # Convert machine_id to string since equipment_id is a String in schema
-    return await db.workorder.find_many(where={"equipment_id": str(machine_id)}, order={'created_at': 'desc'})
+    return await db.workorder.find_many(
+        where={"equipment_id": str(machine_id)}, 
+        order={'created_at': 'desc'},
+        include={"parts": True} # On inclut les pièces pour le calcul des coûts
+    )
+
+@router.get("/{machine_id}/financials")
+async def get_machine_financials(machine_id: int, db: Prisma = Depends(get_db)):
+    """Calcule le coût total de maintenance (pièces) pour une machine."""
+    work_orders = await db.workorder.find_many(
+        where={"equipment_id": str(machine_id)},
+        include={"parts": True}
+    )
+    
+    total_cost = 0.0
+    parts_count = 0
+    
+    for wo in work_orders:
+        for p in wo.parts:
+            cost = (p.quantity or 0) * (p.unit_price_at_consumption or 0.0)
+            total_cost += cost
+            parts_count += p.quantity
+
+    return {
+        "machine_id": machine_id,
+        "total_maintenance_cost": round(total_cost, 3),
+        "total_parts_used": parts_count,
+        "currency": "TND",
+        "last_updated": date.today().isoformat()
+    }

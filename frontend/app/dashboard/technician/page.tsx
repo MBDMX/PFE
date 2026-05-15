@@ -28,14 +28,18 @@ export default function TechnicianDashboard() {
         const fetchCount = () => {
             const token = localStorage.getItem('token');
             if (token) {
-                fetch(`http://${window.location.hostname}:5000/api/parts-requests/pending-count`, {
-                    headers: { Authorization: `Bearer ${token}` }
-                }).then(r => r.json()).then(d => { if (d.count !== undefined) setNotifCount(d.count); }).catch(() => { });
+                gmaoApi.get('/parts-requests/pending-count')
+                    .then(d => { if (d.count !== undefined) setNotifCount(d.count); })
+                    .catch(() => { });
             }
         };
+        
+        // 🔥 REACTIVE: Listen to global notification events from WebSocket
+        const handleNewNotif = () => setNotifCount(prev => prev + 1);
+        window.addEventListener('gmao:notification', handleNewNotif);
+        
         fetchCount();
-        const interval = setInterval(fetchCount, 5000); // 5 sec poll
-        return () => clearInterval(interval);
+        return () => window.removeEventListener('gmao:notification', handleNewNotif);
     }, []);
 
     useEffect(() => {
@@ -47,7 +51,7 @@ export default function TechnicianDashboard() {
                         window.atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))
                     );
                     setUserName(payload.name || payload.username || '');
-                    setUserId(payload.sub || payload.id || payload.user_id || '');
+                    setUserId(String(payload.id || payload.sub || ''));
                 } catch { }
             }
         }

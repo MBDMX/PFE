@@ -6,7 +6,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import {
   LayoutDashboard, Wrench, ClipboardList,
   Package, LogOut, ShieldCheck, Settings, ChevronRight, Users, Warehouse,
-  RefreshCw, Clock, Square, AlertTriangle, Loader2, Bell
+  RefreshCw, Clock, Square, AlertTriangle, Loader2, Bell, Activity, CheckCircle
 } from 'lucide-react';
 import { useEffect, useState, useRef } from 'react';
 import { gmaoApi } from '../services/api';
@@ -14,6 +14,7 @@ import { ToastProvider, useToast } from '../components/ui/toast';
 import { db } from '../lib/db';
 import { useLiveQuery } from 'dexie-react-hooks';
 import axios from 'axios';
+import GuideBubble from '../components/GuideBubble';
 
 // ────────────────────────────────────────────
 // Types & Helpers
@@ -72,7 +73,7 @@ function GlobalTimerBar() {
       const session = await gmaoApi.getTimerActive();
       setActiveSession(session);
       if (session) {
-        startTimer(session.start_time);
+        startTimer(session.start_time, session.total_previous_seconds || 0);
       } else {
         stopTimer();
       }
@@ -82,11 +83,12 @@ function GlobalTimerBar() {
     }
   };
 
-  const startTimer = (startTimeStr: string) => {
+  const startTimer = (startTimeStr: string, previousSeconds: number = 0) => {
     if (intervalRef.current) clearInterval(intervalRef.current);
     const start = new Date(startTimeStr).getTime();
     intervalRef.current = setInterval(() => {
-      setElapsed(Math.floor((new Date().getTime() - start) / 1000));
+      const currentSessionSeconds = Math.floor((new Date().getTime() - start) / 1000);
+      setElapsed(previousSeconds + currentSessionSeconds);
     }, 1000);
   };
 
@@ -101,16 +103,24 @@ function GlobalTimerBar() {
     return () => stopTimer();
   }, [pathname]);
 
-  const handleStop = async () => {
+  const handleStop = async (finish: boolean = false) => {
     if (!activeSession) return;
     try {
-      await gmaoApi.stopTimer(String(activeSession.work_order_id));
+      const stopData = finish ? { status: 'done' } : { status: 'in_progress' };
+      await gmaoApi.stopTimer(String(activeSession.work_order_id), stopData);
+      
+      if (finish) {
+        success("Intervention terminée !");
+      } else {
+        success("Intervention en pause.");
+      }
+      
       stopTimer();
       setActiveSession(null);
-      success("Session terminée !");
-      window.location.reload();
+      // Mettre à jour Dexie au lieu de reload()
+      gmaoApi.getWorkOrder(String(activeSession.work_order_id)).then(wo => db.workOrders.put(wo));
     } catch (err) {
-      error("Erreur lors de l'arrêt");
+      error("Erreur lors de l'action");
     }
   };
 
@@ -139,16 +149,25 @@ function GlobalTimerBar() {
         </div>
       </div>
 
-      <div className="flex items-center gap-6 sm:gap-12">
-        <div className="text-xl sm:text-3xl font-black text-white tabular-nums tracking-tighter">
+      <div className="flex items-center gap-3 sm:gap-6">
+        <div className="text-xl sm:text-3xl font-black text-white tabular-nums tracking-tighter mr-2">
           {formatTime(elapsed)}
         </div>
-        <button
-          onClick={handleStop}
-          className="bg-white text-blue-600 px-4 sm:px-6 py-2 rounded-xl font-black text-[0.65rem] sm:text-xs uppercase tracking-widest hover:bg-blue-50 transition-all shadow-lg active:scale-95 flex items-center gap-2 whitespace-nowrap"
-        >
-          <Square size={14} fill="currentColor" /> <span className="hidden sm:inline">Arrêter le compteur</span><span className="sm:hidden">Stop</span>
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={() => handleStop(false)}
+            className="bg-white/20 hover:bg-white/30 text-white px-3 sm:px-5 py-2 rounded-xl font-black text-[0.65rem] sm:text-xs uppercase tracking-widest transition-all active:scale-95 flex items-center gap-2"
+            title="Mettre en pause"
+          >
+            <Clock size={14} /> <span className="hidden sm:inline">Pause</span>
+          </button>
+          <button
+            onClick={() => handleStop(true)}
+            className="bg-white text-blue-600 px-4 sm:px-6 py-2 rounded-xl font-black text-[0.65rem] sm:text-xs uppercase tracking-widest hover:bg-blue-50 transition-all shadow-lg active:scale-95 flex items-center gap-2 whitespace-nowrap"
+          >
+            <CheckCircle size={14} fill="currentColor" className="text-blue-600" /> <span className="hidden sm:inline">Terminer la tâche</span><span className="sm:hidden">Fin</span>
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -170,17 +189,50 @@ function ClientAppWrapper({ children }: { children: React.ReactNode }) {
 
   const isLogin = path === '/login' || path === '/';
 
-  // 0. Monitor Network Status
+  // 0. Monitor Network Status (Ultra-Reliable check)
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    setIsOnline(navigator.onLine);
-    const h1 = () => setIsOnline(true);
-    const h2 = () => setIsOnline(false);
-    window.addEventListener('online', h1);
-    window.addEventListener('offline', h2);
+
+    const checkRealStatus = () => {
+      const img = new Image();
+      // Timeout très court (1.5s) pour détecter la perte de WiFi instantanément
+      const timer = setTimeout(() => { img.src = ""; setIsOnline(false); }, 1500);
+      
+      img.src = "https://www.google.com/favicon.ico?t=" + Date.now();
+      
+      img.onload = () => {
+        clearTimeout(timer);
+        setIsOnline(prev => {
+          if (!prev) {
+            console.log("🚀 Connection restored! Triggering sync...");
+            gmaoApi.syncData().then(() => {
+              success("Synchronisation réussie", "Vos actions hors-ligne ont été envoyées.");
+            }).catch(() => {});
+          }
+          return true;
+        });
+      };
+      
+      img.onerror = () => {
+        clearTimeout(timer);
+        setIsOnline(false);
+      };
+    };
+
+    // Vérification initiale
+    checkRealStatus();
+
+    // On vérifie toutes les 3 secondes pour une réactivité maximale pendant la démo
+    const interval = setInterval(checkRealStatus, 3000);
+
+    // On garde quand même les événements natifs pour la vitesse
+    window.addEventListener('online', checkRealStatus);
+    window.addEventListener('offline', () => setIsOnline(false));
+
     return () => {
-      window.removeEventListener('online', h1);
-      window.removeEventListener('offline', h2);
+      clearInterval(interval);
+      window.removeEventListener('online', checkRealStatus);
+      window.removeEventListener('offline', checkRealStatus);
     };
   }, []);
 
@@ -215,28 +267,46 @@ function ClientAppWrapper({ children }: { children: React.ReactNode }) {
       // Fetch initial notification count
       const token = localStorage.getItem('token');
       if (token) {
-        fetch(`http://${window.location.hostname}:5000/api/parts-requests/pending-count`, {
-          headers: { Authorization: `Bearer ${token}` }
-        }).then(r => r.json()).then(d => { if (d.count !== undefined) setNotifCount(d.count); }).catch(() => { });
+        gmaoApi.get('/parts-requests/pending-count')
+          .then(d => { if (d.count !== undefined) setNotifCount(d.count); })
+          .catch(() => { });
       }
     }
   }, []);
 
-  // 2. Reactive Sync Queue Monitor
+  // 2. Failsafe Sync Queue Monitor (Polling + Event based)
+  const prevCountRef = useRef(0);
   useEffect(() => {
     const updateCount = async () => {
-      const all = await db.syncQueue.toArray();
-      const pending = all.filter(a => a.status === 'pending' || a.status === 'syncing').length;
-      const errors = all.filter(a => a.status === 'error').length;
+      try {
+        const all = await db.syncQueue.toArray();
+        const pending = all.filter(a => a.status === 'pending' || a.status === 'syncing').length;
+        const errors = all.filter(a => a.status === 'error').length;
+        const total = pending + errors;
 
-      setPendingSyncCount(pending + errors);
-      setSyncStatus({ pending, errors, total: pending + errors });
+        if (total > prevCountRef.current && !isOnline) {
+          warning("Action Hors-Ligne", "Enregistré localement.");
+        }
+        prevCountRef.current = total;
+        
+        setPendingSyncCount(total);
+        setSyncStatus({ pending, errors, total });
+      } catch (err) {
+        console.error("Dexie Poll Error:", err);
+      }
     };
 
     updateCount();
-    const timer = setInterval(updateCount, 8000); // 8s — reduced from 2s for performance
-    return () => clearInterval(timer);
-  }, []);
+    const interval = setInterval(updateCount, 1000);
+    
+    // Écouter le signal global pour une mise à jour INSTANTANÉE
+    window.addEventListener('sync-queue-updated', updateCount);
+    
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('sync-queue-updated', updateCount);
+    };
+  }, [isOnline]);
 
   async function handleManualSync() {
     if (isSyncing || pendingSyncCount === 0) return;
@@ -264,7 +334,7 @@ function ClientAppWrapper({ children }: { children: React.ReactNode }) {
     let attempt = 0;
 
     const connectWS = () => {
-      ws = new WebSocket('ws://localhost:5000/ws');
+      ws = new WebSocket('ws://127.0.0.1:5000/ws');
 
       ws.onopen = () => {
         retryDelay = 5000; // reset on success
@@ -282,7 +352,7 @@ function ClientAppWrapper({ children }: { children: React.ReactNode }) {
             try {
               const p = JSON.parse(window.atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
               role = p.role || '';
-              userId = parseInt(p.sub || '0');
+              userId = parseInt(p.id || p.sub || '0');
             } catch { }
           }
 
@@ -301,15 +371,33 @@ function ClientAppWrapper({ children }: { children: React.ReactNode }) {
 
           if (data.event === 'PARTS_APPROVED') {
             if (data.requester_id === userId || role === 'manager' || role === 'admin') {
-              setNotifCount(c => Math.max(0, c - 1));
+              setNotifCount(c => c + 1);
+              window.dispatchEvent(new CustomEvent('gmao:notification'));
               success('✅ Pièces approuvées !', `OT #${data.wo_id} — Les pièces sont prêtes à être récupérées au magasin.`);
             }
           }
 
           if (data.event === 'PARTS_REJECTED') {
             if (data.requester_id === userId) {
-              setNotifCount(c => Math.max(0, c - 1));
+              setNotifCount(c => c + 1);
+              window.dispatchEvent(new CustomEvent('gmao:notification'));
               toastError('❌ Demande refusée', data.reason ? `Raison : ${data.reason}` : `OT #${data.wo_id} — Votre demande a été refusée.`);
+            }
+          }
+
+          if (data.event === 'NEW_WORK_ORDER') {
+            if (data.technician_id === userId) {
+              setNotifCount(c => c + 1);
+              window.dispatchEvent(new CustomEvent('gmao:notification'));
+              success('🔔 Nouvel OT !', `L'OT #${data.id} "${data.title}" vous a été assigné.`);
+            }
+          }
+
+          if (data.event === 'WORK_ORDER_UPDATED' && data.newly_assigned) {
+            if (data.technician_id === userId) {
+              setNotifCount(c => c + 1);
+              window.dispatchEvent(new CustomEvent('gmao:notification'));
+              success('🔄 OT Assigné', `L'OT #${data.id} vient de vous être assigné.`);
             }
           }
 
@@ -402,19 +490,19 @@ function ClientAppWrapper({ children }: { children: React.ReactNode }) {
 
           {user?.role !== 'magasinier' && (
             <>
-              <Link href={getDashHref()} className={`sidebar-link ${path.startsWith('/dashboard') && !path.startsWith('/dashboard/magasinier') ? 'active' : ''}`}>
+              <Link id="nav-dashboard" href={getDashHref()} className={`sidebar-link ${path.startsWith('/dashboard') && !path.startsWith('/dashboard/magasinier') ? 'active' : ''}`}>
                 <LayoutDashboard size={20} />
                 <span>Dashboard</span>
                 {path.startsWith('/dashboard') && !path.startsWith('/dashboard/magasinier') && <ChevronRight size={14} className="ml-auto text-blue-400" />}
               </Link>
 
-              <Link href="/machines" className={`sidebar-link ${path === '/machines' ? 'active' : ''}`}>
+              <Link id="nav-machines" href="/machines" className={`sidebar-link ${path === '/machines' ? 'active' : ''}`}>
                 <Wrench size={20} />
                 <span>Parc Machines</span>
                 {path === '/machines' && <ChevronRight size={14} className="ml-auto text-blue-400" />}
               </Link>
 
-              <Link href="/work-orders" className={`sidebar-link ${path.startsWith('/work-orders') ? 'active' : ''}`}>
+              <Link id="nav-work-orders" href="/work-orders" className={`sidebar-link ${path.startsWith('/work-orders') ? 'active' : ''}`}>
                 <ClipboardList size={20} />
                 <span>Ordre de travail</span>
                 {path.startsWith('/work-orders') && <ChevronRight size={14} className="ml-auto text-blue-400" />}
@@ -422,18 +510,20 @@ function ClientAppWrapper({ children }: { children: React.ReactNode }) {
             </>
           )}
 
-          <Link href="/stock" className={`sidebar-link ${path === '/stock' ? 'active' : ''}`}>
+          <Link id="nav-stock" href="/stock" className={`sidebar-link ${path === '/stock' ? 'active' : ''}`}>
             <Package size={20} />
             <span>Stock Pièces</span>
             {path === '/stock' && <ChevronRight size={14} className="ml-auto text-blue-400" />}
           </Link>
 
           {(user?.role === 'manager' || user?.role === 'admin') && (
-            <Link href="/dashboard/manager/equipe" className={`sidebar-link ${path.startsWith('/dashboard/manager/equipe') ? 'active' : ''}`}>
-              <Users size={20} />
-              <span>Supervision Équipe</span>
-              {path.startsWith('/dashboard/manager/equipe') && <ChevronRight size={14} className="ml-auto text-blue-400" />}
-            </Link>
+            <>
+              <Link href="/dashboard/manager/equipe" className={`sidebar-link ${path.startsWith('/dashboard/manager/equipe') ? 'active' : ''}`}>
+                <Users size={20} />
+                <span>Supervision Équipe</span>
+                {path.startsWith('/dashboard/manager/equipe') && <ChevronRight size={14} className="ml-auto text-blue-400" />}
+              </Link>
+            </>
           )}
           {(user?.role === 'magasinier' || user?.role === 'admin') && (
             <Link href="/dashboard/magasinier" className={`sidebar-link ${path.startsWith('/dashboard/magasinier') ? 'active' : ''} relative`}>
@@ -450,59 +540,53 @@ function ClientAppWrapper({ children }: { children: React.ReactNode }) {
         </nav>
 
         {/* ── Network & Sync Indicator ── */}
-        <div className="mt-6 px-2 space-y-2 border-t border-white/5 pt-6">
-          {/* Network Status Pill */}
+        <div className="mt-auto px-2 pb-6 space-y-3 border-t border-white/5 pt-6">
+          
+          {/* 1. Network Status Pill */}
           <div className={`px-4 py-2.5 rounded-2xl border flex items-center gap-3 transition-all duration-500 ${isOnline ? 'bg-emerald-500/10 border-emerald-500/20' : 'bg-rose-500/10 border-rose-500/30'}`}>
             <div className={`size-2 rounded-full ${isOnline ? 'bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.5)]' : 'bg-rose-500 animate-pulse'}`} />
             <span className={`text-[0.65rem] font-black uppercase tracking-widest ${isOnline ? 'text-emerald-500' : 'text-rose-500'}`}>
-              {isOnline ? 'Mode En Ligne' : 'Mode Hors Ligne'}
+              {isOnline ? '📡 EN LIGNE' : '⚠️ DÉCONNECTÉ'}
             </span>
           </div>
 
-          <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-white/5 border border-white/5">
-            {isSyncing ? (
-              <Loader2 size={12} className="animate-spin text-blue-400" />
-            ) : syncStatus.errors > 0 ? (
-              <AlertTriangle size={12} className="text-amber-500" />
+          {/* 2. Unified Sync Status Block */}
+          <div className="space-y-2">
+            {pendingSyncCount > 0 ? (
+              <div className="bg-amber-500/10 border border-amber-500/30 rounded-2xl p-4 animate-in fade-in zoom-in duration-500">
+                <div className="flex items-center gap-3 mb-3">
+                  <div className="size-3 bg-amber-500 rounded-full animate-pulse shadow-[0_0_10px_rgba(245,158,11,0.6)]" />
+                  <span className="text-[0.7rem] font-black text-amber-500 uppercase tracking-widest">
+                    {pendingSyncCount} Action(s) en attente
+                  </span>
+                </div>
+                
+                <button
+                  onClick={handleManualSync}
+                  disabled={isSyncing || !isOnline}
+                  className={`w-full py-2.5 rounded-xl flex items-center justify-center gap-2 text-[0.65rem] font-black uppercase tracking-widest transition-all ${
+                    isOnline 
+                      ? 'bg-amber-500 text-white hover:bg-amber-400 shadow-lg shadow-amber-500/20 active:scale-95' 
+                      : 'bg-slate-800 text-slate-500 cursor-not-allowed opacity-50'
+                  }`}
+                >
+                  {isSyncing ? (
+                    <Loader2 size={14} className="animate-spin" />
+                  ) : (
+                    <RefreshCw size={14} />
+                  )}
+                  {isSyncing ? 'Synchronisation...' : 'Forcer la Synchro'}
+                </button>
+              </div>
             ) : (
-              <div className="size-2 rounded-full bg-blue-500/40" />
-            )}
-            <span className="text-[0.6rem] font-black uppercase tracking-widest text-slate-400">
-              {isSyncing ? 'Synchronisation...' :
-                syncStatus.errors > 0 ? `${syncStatus.errors} Erreurs` :
-                  'Synchronisé'}
-            </span>
-            {syncStatus.total > 0 && !isSyncing && (
-              <button
-                onClick={handleManualSync}
-                className="p-1.5 hover:bg-white/10 rounded-lg text-blue-400 transition-colors"
-                title="Forcer la synchronisation"
-              >
-                <RefreshCw size={12} className={isSyncing ? "animate-spin" : ""} />
-              </button>
+              <div className="flex items-center gap-3 px-4 py-3 bg-emerald-500/5 border border-emerald-500/10 rounded-2xl transition-all duration-500">
+                <div className="size-2 bg-emerald-500 rounded-full shadow-[0_0_8px_rgba(16,185,129,0.3)]" />
+                <span className="text-[0.65rem] font-black text-emerald-500/80 uppercase tracking-widest">
+                  Données Synchronisées
+                </span>
+              </div>
             )}
           </div>
-
-          {/* Sync Status Pill */}
-          <div className={`px-4 py-2.5 rounded-2xl border flex items-center gap-3 transition-colors ${pendingSyncCount > 0 ? 'bg-amber-500/10 border-amber-500/30' : 'bg-white/5 border-white/5 opacity-50'}`}>
-            <div className={`size-2 rounded-full ${pendingSyncCount > 0 ? 'bg-amber-500 animate-bounce' : 'bg-slate-500'}`} />
-            <span className={`text-[0.65rem] font-black uppercase tracking-widest ${pendingSyncCount > 0 ? 'text-amber-500' : 'text-slate-500'}`}>
-              {pendingSyncCount > 0 ? `${pendingSyncCount} Action(s) en attente` : 'Données synchronisées'}
-            </span>
-          </div>
-
-          {pendingSyncCount > 0 && isOnline && (
-            <button
-              onClick={handleManualSync}
-              disabled={isSyncing}
-              className="w-full py-3 bg-blue-600 hover:bg-blue-500 disabled:bg-slate-800 disabled:cursor-not-allowed text-white text-[0.65rem] font-black uppercase tracking-widest rounded-xl transition-all shadow-lg shadow-blue-500/20 active:scale-95 flex items-center justify-center gap-2"
-            >
-              {isSyncing ? (
-                <div className="size-3 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-              ) : <RefreshCw size={14} />}
-              {isSyncing ? 'Synchronisation...' : 'Forcer la Synchro'}
-            </button>
-          )}
         </div>
 
         {/* ── Bottom ── */}
@@ -532,6 +616,7 @@ function ClientAppWrapper({ children }: { children: React.ReactNode }) {
       <main className="main-content">
         {children}
       </main>
+      <GuideBubble />
 
       {/* GLOBAL PERSISTENT TIMER */}
       {user?.role === 'technician' && <GlobalTimerBar />}

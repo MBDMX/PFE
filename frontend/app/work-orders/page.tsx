@@ -17,11 +17,15 @@ import {
   ChevronRight,
   Loader2,
   RefreshCw,
-  X
+  X,
+  ArrowUpDown,
+  ArrowUp,
+  ArrowDown
 } from 'lucide-react';
 import { gmaoApi } from '@/services/api';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '@/lib/db';
+import { useToast } from '@/components/ui/toast';
 
 type Priority = 'low' | 'medium' | 'high' | 'critical';
 type WOStatus = 'open' | 'in_progress' | 'done' | 'closed' | 'pending_deletion';
@@ -44,7 +48,12 @@ export default function WorkOrdersPage() {
     const [isUpdating, setIsUpdating] = useState<number | null>(null);
     const [isSyncing, setIsSyncing] = useState(false);
     const [mounted, setMounted] = useState(false);
+    
+    // Sorting state
+    const [sortField, setSortField] = useState<string>('id');
+    const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
     const router = useRouter();
+    const { success, error: toastError } = useToast();
 
     const currentUser = gmaoApi.getCurrentUser();
     const isManager = currentUser?.role === 'manager' || currentUser?.role === 'admin';
@@ -65,25 +74,25 @@ export default function WorkOrdersPage() {
         }
     };
 
+    async function handleSyncSAP() {
+        setIsSyncing(true);
+        try {
+            await gmaoApi.syncWorkOrdersFromSap();
+            success("Synchronisation SAP réussie", "Les ordres de travail ont été mis à jour.");
+            // Forcer le rechargement des données locales
+            await gmaoApi.getWorkOrders();
+        } catch (err) {
+            toastError("Erreur de synchronisation", "Impossible de joindre le serveur SAP.");
+        } finally {
+            setIsSyncing(false);
+        }
+    }
+
     // Initial fetch to populate Dexie from server
     useEffect(() => {
         setMounted(true);
         fetchWorkOrders();
     }, []);
-
-    const handleSyncSAP = async () => {
-        setIsSyncing(true);
-        try {
-            const res = await gmaoApi.syncWorkOrdersFromSap();
-            await fetchWorkOrders();
-            window.dispatchEvent(new CustomEvent('api:success', { detail: res.message || 'Synchronisation SAP terminée' }));
-        } catch (err: any) {
-            console.error('SAP Sync failed', err);
-            window.dispatchEvent(new CustomEvent('api:error', { detail: 'Échec de la synchronisation SAP' }));
-        } finally {
-            setIsSyncing(false);
-        }
-    };
 
     const handleDelete = async (order: WorkOrder) => {
         if (!confirm(isManager ? "Supprimer définitivement cet OT ?" : "Demander la suppression de votre OT ?")) return;
@@ -99,10 +108,48 @@ export default function WorkOrdersPage() {
     };
 
     const filteredOrders = orders.filter(o => {
-        const matchesSearch = (o.title + o.sap_order_id).toLowerCase().includes(searchTerm.toLowerCase());
+        const matchesSearch = (o.title + (o.sap_order_id || '') + (o.equipment_id || '')).toLowerCase().includes(searchTerm.toLowerCase());
         const matchesStatus = statusFilter === 'all' || o.status === statusFilter;
         return matchesSearch && matchesStatus;
     });
+
+    const sortedOrders = [...filteredOrders].sort((a, b) => {
+        const aVal = (a as any)[sortField];
+        const bVal = (b as any)[sortField];
+        
+        if (!aVal) return sortOrder === 'asc' ? -1 : 1;
+        if (!bVal) return sortOrder === 'asc' ? 1 : -1;
+
+        if (aVal < bVal) return sortOrder === 'asc' ? -1 : 1;
+        if (aVal > bVal) return sortOrder === 'asc' ? 1 : -1;
+        return 0;
+    });
+
+    const toggleSort = (field: string) => {
+        if (sortField === field) {
+            setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
+        } else {
+            setSortField(field);
+            setSortOrder('asc');
+        }
+    };
+
+    const formatDate = (dateStr: string | null) => {
+        if (!dateStr || dateStr.startsWith('0001-01-01')) return 'Non planifié';
+        try {
+            const d = new Date(dateStr);
+            if (isNaN(d.getTime())) return dateStr;
+            return d.toLocaleDateString('fr-FR', {
+                day: '2-digit',
+                month: '2-digit',
+                year: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit'
+            }).replace(':', 'h');
+        } catch {
+            return dateStr;
+        }
+    };
 
     const getStatusStyle = (status: WOStatus) => {
         switch(status) {
@@ -115,12 +162,14 @@ export default function WorkOrdersPage() {
         }
     };
 
-    const getPriorityStyle = (priority: Priority) => {
-        switch(priority) {
-            case 'low': return 'border-slate-500/30 text-slate-400';
-            case 'medium': return 'border-blue-500/30 text-blue-400';
-            case 'high': return 'border-orange-500/30 text-orange-400';
-            case 'critical': return 'border-rose-500/40 text-rose-400 bg-rose-500/5';
+    const getPriorityStyle = (priority: string | null | undefined) => {
+        const p = (priority || 'medium').toLowerCase();
+        switch(p) {
+            case 'high': return { label: 'High', color: 'text-orange-400', border: 'border-orange-500/20', bg: 'bg-orange-500/10' };
+            case 'critical': 
+            case 'urgent': return { label: 'Critical', color: 'text-rose-400', border: 'border-rose-500/20', bg: 'bg-rose-500/10' };
+            case 'low': return { label: 'Low', color: 'text-emerald-400', border: 'border-emerald-500/20', bg: 'bg-emerald-500/10' };
+            default: return { label: 'Medium', color: 'text-blue-400', border: 'border-blue-500/20', bg: 'bg-blue-500/10' };
         }
     };
 
@@ -132,7 +181,7 @@ export default function WorkOrdersPage() {
                   <p className="text-sm font-bold text-slate-500 uppercase tracking-widest mt-1">Gestion des Ordres de Travail et Maintenance</p>
                 </div>
                 <div className="flex gap-3">
-                    {mounted && isManager && (
+                    {mounted && (isManager || currentUser?.role === 'technician') && (
                         <button 
                             onClick={handleSyncSAP}
                             disabled={isSyncing}
@@ -143,6 +192,7 @@ export default function WorkOrdersPage() {
                         </button>
                     )}
                     <button 
+                      id="create-wo-btn"
                       onClick={() => router.push('/work-orders/new')}
                       className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white px-6 py-3 rounded-2xl font-bold shadow-lg shadow-blue-600/20 transition-all hover:scale-105 active:scale-95"
                     >
@@ -202,11 +252,19 @@ export default function WorkOrdersPage() {
                     <table className="azure-table">
                         <thead>
                             <tr>
-                                <th>Intervention</th>
-                                <th>Priorité</th>
+                                <th onClick={() => toggleSort('title')} className="cursor-pointer hover:bg-white/5 transition-colors">
+                                    <div className="flex items-center gap-2">Intervention {sortField === 'title' && (sortOrder === 'asc' ? <ArrowUp size={12}/> : <ArrowDown size={12}/>)}</div>
+                                </th>
+                                <th onClick={() => toggleSort('priority')} className="cursor-pointer hover:bg-white/5 transition-colors">
+                                    <div className="flex items-center gap-2">Priorité {sortField === 'priority' && (sortOrder === 'asc' ? <ArrowUp size={12}/> : <ArrowDown size={12}/>)}</div>
+                                </th>
                                 <th>Assigné à</th>
-                                <th>Statut</th>
-                                <th>Échéance</th>
+                                <th onClick={() => toggleSort('status')} className="cursor-pointer hover:bg-white/5 transition-colors">
+                                    <div className="flex items-center gap-2">Statut {sortField === 'status' && (sortOrder === 'asc' ? <ArrowUp size={12}/> : <ArrowDown size={12}/>)}</div>
+                                </th>
+                                <th onClick={() => toggleSort('planned_start_date')} className="cursor-pointer hover:bg-white/5 transition-colors">
+                                    <div className="flex items-center gap-2">Échéance {sortField === 'planned_start_date' && (sortOrder === 'asc' ? <ArrowUp size={12}/> : <ArrowDown size={12}/>)}</div>
+                                </th>
                                 <th className="text-right">Actions</th>
                             </tr>
                         </thead>
@@ -217,7 +275,7 @@ export default function WorkOrdersPage() {
                                         <td colSpan={6} className="py-8"><div className="h-4 bg-white/5 rounded-full w-3/4 mx-auto"></div></td>
                                     </tr>
                                 ))
-                            ) : filteredOrders.length > 0 ? filteredOrders.map((o) => {
+                            ) : sortedOrders.length > 0 ? sortedOrders.map((o) => {
                                 const status = getStatusStyle(o.status);
                                 return (
                                     <tr key={o.id} className="group transition-colors">
@@ -233,9 +291,14 @@ export default function WorkOrdersPage() {
                                             </div>
                                         </td>
                                         <td>
-                                            <div className={`px-2 py-1 rounded-md border text-[0.65rem] font-black uppercase tracking-widest inline-block ${getPriorityStyle(o.priority)}`}>
-                                                {o.priority}
-                                            </div>
+                                            {(() => {
+                                                const priority = getPriorityStyle(o.priority);
+                                                return (
+                                                    <span className={`px-2 py-0.5 rounded-md border text-[0.6rem] font-black uppercase tracking-widest ${priority.border} ${priority.color} ${priority.bg}`}>
+                                                        {priority.label}
+                                                    </span>
+                                                );
+                                            })()}
                                         </td>
                                         <td>
                                             <div className="flex items-center gap-2 text-slate-400">
@@ -252,7 +315,7 @@ export default function WorkOrdersPage() {
                                         <td>
                                             <div className="flex items-center gap-2 text-slate-500 font-bold text-[0.7rem] uppercase tracking-widest">
                                                 <Calendar size={12} />
-                                                {o.planned_start_date}
+                                                {formatDate(o.planned_start_date)}
                                             </div>
                                         </td>
                                         <td className="text-right">

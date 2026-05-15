@@ -25,6 +25,7 @@ import {
     CalendarClock,
     Zap,
     RefreshCw,
+    ArrowUpDown,
     Brain,
 } from 'lucide-react';
 import api, { gmaoApi } from '@/services/api';
@@ -57,6 +58,15 @@ export default function MachinesPage() {
     const [loadingOrders, setLoadingOrders] = useState(false);
     const [triggeringMaintenance, setTriggeringMaintenance] = useState(false);
     const [isSyncing, setIsSyncing] = useState(false);
+    const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'asc' | 'desc' } | null>({ key: 'name', direction: 'asc' });
+
+    const handleSort = (key: string) => {
+        let direction: 'asc' | 'desc' = 'asc';
+        if (sortConfig && sortConfig.key === key && sortConfig.direction === 'asc') {
+            direction = 'desc';
+        }
+        setSortConfig({ key, direction });
+    };
 
     async function handleSyncSAP() {
         setIsSyncing(true);
@@ -152,11 +162,30 @@ export default function MachinesPage() {
         return matchesSearch && matchesStatus;
     });
 
+    const sortedMachines = [...filteredMachines].sort((a, b) => {
+        if (!sortConfig) return 0;
+        const { key, direction } = sortConfig;
+        
+        let aValue = (a as any)[key];
+        let bValue = (b as any)[key];
+
+        // Handle specific health score fallback
+        if (key === 'ml_score') {
+            aValue = (a as any).ml_score ?? a.health_score;
+            bValue = (b as any).ml_score ?? b.health_score;
+        }
+
+        if (aValue < bValue) return direction === 'asc' ? -1 : 1;
+        if (aValue > bValue) return direction === 'asc' ? 1 : -1;
+        return 0;
+    });
+
     const getStatusInfo = (status: Status) => {
         switch (status) {
             case 'operational': return { label: 'Opérationnel', color: 'text-emerald-400', bg: 'bg-emerald-400/10', icon: Activity };
             case 'maintenance': return { label: 'Maintenance', color: 'text-amber-400', bg: 'bg-amber-400/10', icon: Wrench };
             case 'breakdown': return { label: 'En Panne', color: 'text-rose-400', bg: 'bg-rose-400/10', icon: AlertCircle };
+            default: return { label: status || 'Inconnu', color: 'text-slate-400', bg: 'bg-slate-400/10', icon: Activity };
         }
     };
 
@@ -185,6 +214,7 @@ export default function MachinesPage() {
                     <p className="text-sm font-bold text-slate-500 uppercase tracking-widest mt-1">Inventaire et État de Santé des Équipements (Source SAP)</p>
                 </div>
                 <button
+                    id="sync-sap-btn"
                     onClick={handleSyncSAP}
                     disabled={isSyncing}
                     className="flex items-center gap-2 px-6 py-3 rounded-2xl bg-white/5 hover:bg-white/10 border border-white/5 hover:border-blue-500/30 text-white font-black uppercase text-xs tracking-widest transition-all group disabled:opacity-50"
@@ -199,6 +229,7 @@ export default function MachinesPage() {
                 <div className="relative flex-1 group">
                     <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500 group-focus-within:text-blue-400 transition-colors" size={18} />
                     <input
+                        id="search-bar"
                         type="text"
                         placeholder="Rechercher par nom ou référence..."
                         className="w-full bg-slate-900/50 border border-white/5 rounded-2xl py-3 pl-12 pr-4 text-sm font-medium focus:outline-none focus:border-blue-500/50 focus:bg-slate-900 transition-all"
@@ -229,11 +260,21 @@ export default function MachinesPage() {
                     <table className="azure-table">
                         <thead>
                             <tr>
-                                <th>Équipement</th>
-                                <th>Localisation</th>
-                                <th>Maintenance</th>
-                                <th>État Santé</th>
-                                <th>Statut</th>
+                                <th onClick={() => handleSort('name')} className="cursor-pointer hover:text-blue-400 transition-colors">
+                                    <div className="flex items-center gap-2">Équipement <ArrowUpDown size={12} className="opacity-50" /></div>
+                                </th>
+                                <th onClick={() => handleSort('location')} className="cursor-pointer hover:text-blue-400 transition-colors">
+                                    <div className="flex items-center gap-2">Localisation <ArrowUpDown size={12} className="opacity-50" /></div>
+                                </th>
+                                <th onClick={() => handleSort('next_maintenance_date')} className="cursor-pointer hover:text-blue-400 transition-colors">
+                                    <div className="flex items-center gap-2">Maintenance <ArrowUpDown size={12} className="opacity-50" /></div>
+                                </th>
+                                <th onClick={() => handleSort('ml_score')} className="cursor-pointer hover:text-blue-400 transition-colors">
+                                    <div className="flex items-center gap-2">État Santé <ArrowUpDown size={12} className="opacity-50" /></div>
+                                </th>
+                                <th onClick={() => handleSort('status')} className="cursor-pointer hover:text-blue-400 transition-colors">
+                                    <div className="flex items-center gap-2">Statut <ArrowUpDown size={12} className="opacity-50" /></div>
+                                </th>
                                 <th className="text-right">Actions</th>
                             </tr>
                         </thead>
@@ -244,7 +285,7 @@ export default function MachinesPage() {
                                         <td colSpan={6} className="py-8"><div className="h-4 bg-white/5 rounded-full w-3/4 mx-auto"></div></td>
                                     </tr>
                                 ))
-                            ) : filteredMachines.length > 0 ? filteredMachines.map((m) => {
+                            ) : sortedMachines.length > 0 ? sortedMachines.map((m, idx) => {
                                 const status = getStatusInfo(m.status);
                                 return (
                                     <tr key={m.id}
@@ -288,7 +329,7 @@ export default function MachinesPage() {
                                         <td>
                                             <div className="flex flex-col gap-2 w-32">
                                                 <div className="flex items-center justify-between">
-                                                    <div className="flex items-center gap-1.5">
+                                                    <div id={idx === 0 ? "ml-health-score" : undefined} className="flex items-center gap-1.5">
                                                         <span className={`text-[0.65rem] font-black uppercase tracking-widest ${(m as any).ml_score ? ((m as any).ml_score > 50 ? 'text-emerald-400' : 'text-rose-400') : (m.health_score > 50 ? 'text-emerald-400' : 'text-rose-400')}`}>
                                                             {(m as any).ml_score ?? m.health_score}%
                                                         </span>

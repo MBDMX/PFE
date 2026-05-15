@@ -15,7 +15,7 @@ export const FaceEnroll = () => {
     const [progress, setProgress] = useState(0);
     const [currentStep, setCurrentStep] = useState<ScanStep>('FRONT');
     const [enrolling, setEnrolling] = useState(false);
-    const collectedDescriptors = useRef<number[][]>([]);
+    const [capturedDescriptors, setCapturedDescriptors] = useState<number[][]>([]);
     const { success, error } = useToast();
 
     const getHeadPose = (landmarks: faceapi.FaceLandmarks68) => {
@@ -57,7 +57,6 @@ export const FaceEnroll = () => {
             setStream(s);
             if (videoRef.current) videoRef.current.srcObject = s;
             setStatus('idle');
-            // Auto-start enrollment
             setEnrolling(true);
         } catch (err: any) {
             error('Erreur', 'Impossible d\'ouvrir la caméra');
@@ -80,35 +79,36 @@ export const FaceEnroll = () => {
         const interval = setInterval(async () => {
             if (videoRef.current && videoRef.current.readyState === 4) {
                 try {
-                    const detection = await faceapi.detectSingleFace(videoRef.current, new faceapi.SsdMobilenetv1Options({ minConfidence: 0.35 }))
+                    const detection = await faceapi.detectSingleFace(videoRef.current, new faceapi.SsdMobilenetv1Options({ minConfidence: 0.50 }))
                         .withFaceLandmarks()
                         .withFaceDescriptor();
 
                     if (detection) {
                         const { horizontalRatio, verticalRatio } = getHeadPose(detection.landmarks);
                         let stepValid = false;
+                        
+                        // Seuils ultra-rapides
                         switch (currentStep) {
-                            case 'FRONT': if (Math.abs(horizontalRatio) < 0.2) stepValid = true; break;
-                            case 'LEFT':  if (horizontalRatio < -0.3) stepValid = true; break;
-                            case 'RIGHT': if (horizontalRatio > 0.3) stepValid = true; break;
+                            case 'FRONT': if (Math.abs(horizontalRatio) < 0.15) stepValid = true; break;
+                            case 'LEFT':  if (horizontalRatio < -0.15) stepValid = true; break;
+                            case 'RIGHT': if (horizontalRatio > 0.15) stepValid = true; break;
                             case 'UP':    if (verticalRatio < 0.25) stepValid = true; break;
-                            case 'DOWN':  if (verticalRatio > 0.55) stepValid = true; break;
+                            case 'DOWN':  if (verticalRatio > 0.28) stepValid = true; break; 
                         }
 
                         if (stepValid) {
-                            // Collect this pose's descriptor
-                            collectedDescriptors.current.push(Array.from(detection.descriptor));
+                            const newDescriptors = [...capturedDescriptors, Array.from(detection.descriptor)];
+                            setCapturedDescriptors(newDescriptors);
 
                             if (currentStep === 'DOWN') {
                                 setProgress(100);
                                 setEnrolling(false);
-                                // Save the AVERAGE of all 5 pose descriptors for robust matching
-                                const averaged = averageDescriptors(collectedDescriptors.current);
-                                const res = await gmaoApi.enrollFace(averaged);
+                                // Appel multi-échantillons (5 samples)
+                                const res = await gmaoApi.enrollFaceMulti(newDescriptors);
                                 if (res) {
                                     setStatus('success');
                                     setCurrentStep('SUCCESS');
-                                    success('Succès', 'Profil enregistré !');
+                                    success('Succès', 'Profil Biométrique 5 points enregistré !');
                                     setTimeout(() => window.location.reload(), 2000);
                                 }
                             } else {
@@ -121,9 +121,9 @@ export const FaceEnroll = () => {
                     }
                 } catch (err) { console.error(err); }
             }
-        }, 200);
+        }, 100); // 100ms - ULTRA FAST
         return () => clearInterval(interval);
-    }, [enrolling, currentStep]);
+    }, [enrolling, currentStep, capturedDescriptors]);
 
     const getStepLabel = () => {
         switch (currentStep) {
