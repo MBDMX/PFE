@@ -20,12 +20,16 @@ interface Props {
     icon: LucideIcon;
     color?: Color;
     alert?: boolean; // pulse red if true
+    onClick?: () => void;
 }
 
-export default function KPICard({ label, value, sub, icon: Icon, color = 'blue', alert }: Props) {
+export default function KPICard({ label, value, sub, icon: Icon, color = 'blue', alert, onClick }: Props) {
     const c = COLOR_MAP[color];
     return (
-        <div className={`relative rounded-2xl border p-5 ${c.card} transition-all hover:scale-[1.02]`}>
+        <div 
+            onClick={onClick}
+            className={`relative rounded-2xl border p-5 ${c.card} transition-all hover:scale-[1.02] ${onClick ? 'cursor-pointer' : ''}`}
+        >
             {alert && (
                 <span className="absolute top-3 right-3 size-2 rounded-full bg-rose-400 animate-ping" />
             )}

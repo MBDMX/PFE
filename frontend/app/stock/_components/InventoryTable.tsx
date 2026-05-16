@@ -1,7 +1,7 @@
 import { 
   Package, MapPin, ShoppingCart, ArrowUpDown, 
   CheckCircle2, AlertCircle, Settings2, Wrench, 
-  Zap, Droplets, Cpu, Box 
+  Zap, Droplets, Cpu, Box, ArrowRightLeft 
 } from 'lucide-react';
 import { StockItem } from './types';
 import { gmaoApi } from '../../../services/api';
@@ -12,6 +12,7 @@ interface Props {
   isLoading: boolean;
   canOrder: boolean;
   onOrder: (item: StockItem) => void;
+  onTransfer?: (ref: string, qty: number) => void;
   sortConfig?: { key: string; direction: 'asc' | 'desc' } | null;
   onSort?: (key: string) => void;
 }
@@ -127,7 +128,7 @@ function TableSkeleton({ canOrder }: { canOrder: boolean }) {
   );
 }
 
-export default function InventoryTable({ items, isLoading, canOrder, onOrder, sortConfig, onSort }: Props) {
+export default function InventoryTable({ items, isLoading, canOrder, onOrder, onTransfer, sortConfig, onSort }: Props) {
   
   const SortHeader = ({ label, sortKey }: { label: string; sortKey: string }) => (
     <th 

@@ -66,7 +66,9 @@ export default function LoginPage() {
       // If they have a face, redirect normally
       const route = ROLE_ROUTES[user.role];
       if (!route) throw new Error('Rôle inconnu');
-      router.replace(route);
+      
+      // Use window.location.href for a clean "solid base" redirect
+      window.location.href = route;
     } catch (err: any) {
       let msg = err.response?.data?.detail;
       if (Array.isArray(msg)) msg = msg[0]?.msg;

@@ -8,7 +8,6 @@ import {
 import { Html5Qrcode } from 'html5-qrcode';
 import { gmaoApi } from '../../../../services/api';
 import { useToast } from '../../../../components/ui/toast';
-import { Html5Qrcode } from 'html5-qrcode';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -123,59 +122,6 @@ export default function PdaScanner() {
             } else {
                 setNotFound(true);
                 toastError('Inconnu', `Aucune pièce trouvée pour "${q}"`);
-            }
-        } catch {
-            toastError('Erreur', 'Impossible de contacter le serveur');
-        } finally {
-            setSearching(false);
-        }
-    }
-
-            const config = { fps: 10, qrbox: { width: 250, height: 250 } };
-
-            scanner.start(
-                { facingMode: 'environment' },
-                config,
-                (decodedText) => {
-                    setQuery(decodedText);
-                    setCameraActive(false); // Stop after success
-                    // Trigger search automatically
-                    setTimeout(() => {
-                        handleSearchWithQuery(decodedText);
-                    }, 100);
-                },
-                undefined
-            ).catch(err => {
-                console.error('Scanner error:', err);
-                toastError('Caméra', 'Impossible d\'accéder à la caméra');
-                setCameraActive(false);
-            });
-
-            return () => {
-                if (scannerRef.current?.isScanning) {
-                    scannerRef.current.stop().then(() => scannerRef.current?.clear());
-                }
-            };
-        }
-    }, [cameraActive]);
-
-    async function handleSearchWithQuery(searchQuery: string) {
-        if (!searchQuery.trim()) return;
-        setSearching(true);
-        setFound(null);
-        setNotFound(false);
-        setAction(null);
-        try {
-            const stock: StockItem[] = await gmaoApi.getStock();
-            const match = stock.find(
-                s => s.reference.toLowerCase() === searchQuery.trim().toLowerCase() ||
-                     s.name.toLowerCase().includes(searchQuery.trim().toLowerCase())
-            );
-            if (match) {
-                setFound(match);
-                setLocationInput(match.location);
-            } else {
-                setNotFound(true);
             }
         } catch {
             toastError('Erreur', 'Impossible de contacter le serveur');

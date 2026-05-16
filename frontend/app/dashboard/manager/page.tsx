@@ -118,6 +118,7 @@ export default function ManagerDashboard() {
                         sub={`${stats.totalOT} ordres au total`}
                         icon={CheckCircle}
                         color="emerald"
+                        onClick={() => router.push('/work-orders')}
                     />
                     <KPICard
                         label="En cours"
@@ -125,6 +126,7 @@ export default function ManagerDashboard() {
                         sub={`${stats.openOT} en attente`}
                         icon={Wrench}
                         color="amber"
+                        onClick={() => router.push('/work-orders')}
                     />
                     <KPICard
                         label="OT Critiques"
@@ -133,6 +135,7 @@ export default function ManagerDashboard() {
                         icon={Flame}
                         color="rose"
                         alert={stats.criticalOT > 0}
+                        onClick={() => router.push('/work-orders')}
                     />
                     <KPICard
                         label="Stock bas"
@@ -141,6 +144,7 @@ export default function ManagerDashboard() {
                         icon={Package}
                         color="orange"
                         alert={stats.lowStock > 0}
+                        onClick={() => router.push('/stock')}
                     />
                     <KPICard
                         label="Maint. Due"
@@ -149,6 +153,7 @@ export default function ManagerDashboard() {
                         icon={CalendarClock}
                         color="violet"
                         alert={stats.dueMaintenance > 0}
+                        onClick={() => router.push('/machines')}
                     />
                 </div>
             ) : null}

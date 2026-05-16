@@ -1,23 +1,18 @@
-[DESCRIPTORS] Served 1 profile(s)
-[DESCRIPTORS] Served 1 profile(s)
-[DESCRIPTORS] Served 1 profile(s)
-[ENROLL] Single descriptor saved for user magasinier
-[DESCRIPTORS] Served 2 profile(s)
-[ENROLL] Single descriptor saved for user resp1
-[DESCRIPTORS] Served 2 profile(s)
-[FACE TOKEN] Re-verify resp1: dist=0.4398
-[FACE TOKEN] OK — issuing tokens for resp1
-[DESCRIPTORS] Served 2 profile(s)
-[DESCRIPTORS] Served 2 profile(s)
-[DESCRIPTORS] Served 2 profile(s)
-[DESCRIPTORS] Served 2 profile(s)
-[DESCRIPTORS] Served 2 profile(s)
-[FACE TOKEN] Re-verify resp1: dist=0.6866
-[FACE TOKEN] REJECTED — dist=0.6866 >= 0.65
-[FACE TOKEN] Re-verify resp1: dist=0.6666
-[FACE TOKEN] REJECTED — dist=0.6666 >= 0.65
-[DESCRIPTORS] Served 2 profile(s)
-[FACE TOKEN] Re-verify resp1: dist=0.6213
-[FACE TOKEN] OK — issuing tokens for resp1
-[DESCRIPTORS] Served 2 profile(s)
-[DESCRIPTORS] Served 2 profile(s)
+
+[DESCRIPTORS] Served 4 profile(s)
+[DESCRIPTORS] Served 4 profile(s)
+[DESCRIPTORS] Served 4 profile(s)
+[DESCRIPTORS] Served 4 profile(s)
+[DESCRIPTORS] Served 4 profile(s)
+[DESCRIPTORS] Served 4 profile(s)
+[DESCRIPTORS] Served 4 profile(s)
+[DESCRIPTORS] Served 4 profile(s)
+[DESCRIPTORS] Served 4 profile(s)
+[DESCRIPTORS] Served 4 profile(s)
+[DESCRIPTORS] Served 4 profile(s)
+[DESCRIPTORS] Served 4 profile(s)
+[DESCRIPTORS] Served 4 profile(s)
+[DESCRIPTORS] Served 4 profile(s)
+[DESCRIPTORS] Served 4 profile(s)
+[DESCRIPTORS] Served 4 profile(s)
+[DESCRIPTORS] Served 4 profile(s)

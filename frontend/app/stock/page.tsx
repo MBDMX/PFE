@@ -40,12 +40,7 @@ export default function StockPage() {
       }
     }
     
-    const syncData = async () => {
-      try {
-        await gmaoApi.syncData();
-      } catch (e) {}
-    };
-    syncData();
+
   }, []);
 
   // ── Debounced smart search ──
@@ -113,6 +108,20 @@ export default function StockPage() {
       }
     } catch {
       toastError('Échec de la commande', 'Vérifiez la connexion SAP ou vos droits');
+    }
+  };
+
+  const handleTransfer = async (ref: string, qty: number) => {
+    try {
+      const res = await gmaoApi.transferStock(ref, qty);
+      if (res.offline) {
+        success('Mode Hors-Ligne', `Transfert de ${ref} ajouté à la file.`);
+      } else {
+        success('Transfert SAP validé ✅', `Stock transféré vers le magasin Maintenance.`);
+        await gmaoApi.getStock();
+      }
+    } catch {
+      toastError('Erreur de transfert', 'Impossible de valider le transfert dans SAP.');
     }
   };
 
@@ -213,6 +222,7 @@ export default function StockPage() {
           isLoading={isLoading}
           canOrder={canOrder}
           onOrder={handleOrder}
+          onTransfer={handleTransfer}
           sortConfig={sortConfig}
           onSort={handleSort}
         />

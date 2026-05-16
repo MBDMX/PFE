@@ -1,9 +1,10 @@
 from typing import List, Optional
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from prisma import Prisma
 from app.db.session import get_db
 from app.api.deps import role_required, get_current_user
 from app.schemas.schemas import UserOut, WorkSession as WorkSessionSchema
+from app.core.security import get_password_hash
 
 router = APIRouter(tags=["users"])
 
@@ -79,3 +80,72 @@ async def get_tech_work_orders(tech_id: int, db: Prisma = Depends(get_db)):
         include={"parts": True, "steps": True}, 
         order={'created_at': 'desc'}
     )
+
+# ── Admin User Management ──────────────────────────────────────────────────
+
+@router.get("/admin/users")
+async def admin_list_users(
+    db: Prisma = Depends(get_db),
+    _=Depends(role_required(["admin"]))
+):
+    """List all users in the system (admin only)."""
+    users = await db.user.find_many(order={"id": "asc"})
+    return [
+        {
+            "id": u.id,
+            "name": u.name or u.username,
+            "username": u.username,
+            "email": u.email or "",
+            "role": u.role,
+            "is_active": u.is_active,
+            "permissions": u.permissions
+        }
+        for u in users
+    ]
+
+@router.delete("/admin/users/{user_id}")
+async def admin_delete_user(
+    user_id: int,
+    db: Prisma = Depends(get_db),
+    current_user=Depends(role_required(["admin"]))
+):
+    """Delete a user (admin only). Cannot delete yourself."""
+    if user_id == current_user.id:
+        raise HTTPException(status_code=400, detail="Vous ne pouvez pas supprimer votre propre compte.")
+    user = await db.user.find_unique(where={"id": user_id})
+    if not user:
+        raise HTTPException(status_code=404, detail="Utilisateur non trouvé.")
+    await db.user.delete(where={"id": user_id})
+    return {"ok": True, "deleted_id": user_id}
+
+@router.patch("/admin/users/{user_id}")
+async def admin_update_user(
+    user_id: int,
+    data: dict,
+    db: Prisma = Depends(get_db),
+    _=Depends(role_required(["admin"]))
+):
+    """Update user properties (admin only)."""
+    update_data = {}
+    if "role" in data:
+        update_data["role"] = data["role"]
+    if "name" in data:
+        update_data["name"] = data["name"]
+    if "is_active" in data:
+        update_data["is_active"] = data["is_active"]
+    if "permissions" in data:
+        update_data["permissions"] = data["permissions"]
+    if "password" in data and data["password"]:
+        update_data["password_hash"] = get_password_hash(data["password"])
+    
+    if not update_data:
+        raise HTTPException(status_code=400, detail="Aucune donnée à mettre à jour.")
+    
+    updated = await db.user.update(where={"id": user_id}, data=update_data)
+    return {
+        "id": updated.id, 
+        "name": updated.name, 
+        "role": updated.role, 
+        "is_active": updated.is_active,
+        "permissions": updated.permissions
+    }
