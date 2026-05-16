@@ -12,6 +12,7 @@ interface RequestItem {
     quantity_requested: number;
     quantity_approved: number | null;
     stock_id?: number | null;
+    location?: string;
 }
 
 interface PartsRequest {
@@ -308,7 +309,13 @@ export default function RequestManager() {
                                                  />
                                                  <div className="text-xs font-bold text-slate-200">{item.part_name}</div>
                                              </div>
-                                             <div className="text-lg font-black text-white shrink-0">x{item.quantity_requested}</div>
+                                             <div className="flex items-center gap-4">
+                                                 <div className="text-right shrink-0">
+                                                     <div className="text-[0.6rem] font-black text-amber-500 uppercase tracking-tighter">Place</div>
+                                                     <div className="text-xs font-black text-white font-mono bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber-500/20">{item.location || '01'}</div>
+                                                 </div>
+                                                 <div className="text-lg font-black text-white shrink-0">x{item.quantity_requested}</div>
+                                             </div>
                                          </div>
                                      ))}
                                  </div>

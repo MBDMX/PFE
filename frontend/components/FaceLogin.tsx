@@ -1,8 +1,8 @@
 'use client';
 
-import { useRef, useState, useEffect } from 'react';
+import { useRef, useState, useEffect, useCallback } from 'react';
 import api from '../services/api';
-import { Camera, X, Loader2, UserCheck, ShieldCheck, AlertCircle } from 'lucide-react';
+import { Camera, X, Loader2, UserCheck, ShieldCheck, AlertCircle, Zap } from 'lucide-react';
 import * as faceapi from 'face-api.js';
 import { useToast } from './ui/toast';
 
@@ -19,199 +19,226 @@ interface FaceLoginProps {
     onSuccess: (userData: any) => void;
 }
 
-// ─── Constants ────────────────────────────────────────────────────────────────
-const MODEL_URL        = '/models';
-const MATCH_THRESHOLD  = 0.75;  // Local matching threshold (was 0.70)
-const REQUIRED_HITS    = 1;     // Just 1 hit is enough now for maximum speed
-const SCAN_INTERVAL_MS = 100;   // Scan every 100 ms - INSTANT
-const MIN_CONFIDENCE   = 0.50;  // Face detection confidence (relaxed for speed)
-
-// ─── Models singleton (loaded once for the whole session) ─────────────────────
+// ─── Global singletons — survive component re-renders ─────────────────────────
+// These are module-level so they persist across the whole page session.
 let modelsReady = false;
-async function ensureModels() {
-    if (modelsReady) return;
-    await Promise.all([
-        faceapi.nets.ssdMobilenetv1.loadFromUri(MODEL_URL),
-        faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL),
-        faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL),
-    ]);
-    modelsReady = true;
-}
+let modelsLoading = false;
+let cachedProfiles: FaceProfile[] = [];
+let cachedMatcher: faceapi.FaceMatcher | null = null;
 
-// ─── Component ────────────────────────────────────────────────────────────────
-export const FaceLogin = ({ onSuccess }: FaceLoginProps) => {
-    const videoRef  = useRef<HTMLVideoElement>(null);
-    const matcherRef = useRef<faceapi.FaceMatcher | null>(null);
-    const profilesRef = useRef<FaceProfile[]>([]);
+const MODEL_URL = '/models';
 
-    const [isOpen,  setIsOpen]  = useState(false);
-    const [status,  setStatus]  = useState<'idle' | 'loading' | 'scanning' | 'success' | 'error'>('idle');
-    const [message, setMessage] = useState('Prêt');
-    const [stream,  setStream]  = useState<MediaStream | null>(null);
+// ─── Thresholds ───────────────────────────────────────────────────────────────
+// face-api.js uses EUCLIDEAN distance (NOT cosine):
+//   Same person    ≈ 0.30–0.45
+//   Different person ≈ 0.60–1.0
+const MATCH_THRESHOLD  = 0.55;   // Euclidean — tolerant to lighting/angle variation
+const MIN_CONFIRM_HITS = 1;      // 1 frame = INSTANT login
+const SCAN_INTERVAL_MS = 100;    // 100ms = 10fps detection loop
+const MIN_CONFIDENCE   = 0.50;   // Relaxed for max speed
+const MIN_GAP          = 0.08;   // Gap between 1st and 2nd best match
 
-    const { error: toastError } = useToast();
-
-    // ── Cleanup on unmount ────────────────────────────────────────────────────
-    useEffect(() => () => { stopStream(); }, []);
-
-    function stopStream() {
-        stream?.getTracks().forEach(t => t.stop());
-        setStream(null);
-    }
-
-    // ─── Preload on mount ─────────────────────────────────────────────────────
-    useEffect(() => {
-        const preload = async () => {
-            try {
-                await ensureModels();
-                const { data: profiles } = await api.get<FaceProfile[]>('/face/descriptors');
-                profilesRef.current = profiles;
-            } catch (err) { console.error('Preload failed', err); }
-        };
-        preload();
-    }, []);
-
-    // ── Open scanner ──────────────────────────────────────────────────────────
-    const openScanner = async () => {
-        setIsOpen(true);
-        setStatus('loading');
-
-        try {
-            // navigator.mediaDevices is only available in secure contexts (HTTPS or localhost)
-            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-                toastError('Contexte non sécurisé', 'La caméra nécessite HTTPS ou localhost. Accédez via http://localhost:3000');
-                setIsOpen(false);
-                return;
-            }
-
-            // 1. Load AI models (cached after first load)
-            // Models and profiles are likely already loaded via useEffect
-            await ensureModels();
-            if (profilesRef.current.length === 0) {
-                const { data: profiles } = await api.get<FaceProfile[]>('/face/descriptors');
-                profilesRef.current = profiles;
-            }
-
-            if (profilesRef.current.length === 0) {
-                setStatus('error');
-                setMessage('Aucun profil facial enregistré');
-                return;
-            }
-
-            const labeled = profilesRef.current.map(p =>
+// ─── Preload function — called BEFORE scanner opens ───────────────────────────
+async function preloadFaceEngine(): Promise<void> {
+    if (modelsReady && cachedProfiles.length > 0 && cachedMatcher) return;
+    if (modelsLoading) return;
+    modelsLoading = true;
+    try {
+        // Load AI models in parallel
+        if (!modelsReady) {
+            await Promise.all([
+                faceapi.nets.ssdMobilenetv1.loadFromUri(MODEL_URL),
+                faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL),
+                faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL),
+            ]);
+            modelsReady = true;
+        }
+        // Load face profiles from backend
+        const { data: profiles } = await api.get<FaceProfile[]>('/face/descriptors');
+        cachedProfiles = profiles;
+        // Pre-build the FaceMatcher so it's ready instantly when scanner opens
+        if (profiles.length > 0) {
+            const labeled = profiles.map(p =>
                 new faceapi.LabeledFaceDescriptors(
                     String(p.id),
                     p.descriptors.map(d => new Float32Array(d))
                 )
             );
-            matcherRef.current = new faceapi.FaceMatcher(labeled, MATCH_THRESHOLD);
+            cachedMatcher = new faceapi.FaceMatcher(labeled, MATCH_THRESHOLD);
+        }
+    } catch (err) {
+        console.warn('FaceEngine preload failed:', err);
+    } finally {
+        modelsLoading = false;
+    }
+}
 
+// ─── Component ────────────────────────────────────────────────────────────────
+export const FaceLogin = ({ onSuccess }: FaceLoginProps) => {
+    const videoRef   = useRef<HTMLVideoElement>(null);
+    const streamRef  = useRef<MediaStream | null>(null);
+    const activeRef  = useRef(false);
+
+    const [isOpen,  setIsOpen]  = useState(false);
+    const [status,  setStatus]  = useState<'idle' | 'loading' | 'scanning' | 'success' | 'error'>('idle');
+    const [message, setMessage] = useState('');
+    const [engineReady, setEngineReady] = useState(false);
+
+    const { error: toastError } = useToast();
+
+    // ── Preload IMMEDIATELY on mount — not when user clicks ───────────────────
+    useEffect(() => {
+        preloadFaceEngine().then(() => {
+            setEngineReady(modelsReady && cachedProfiles.length > 0);
+        });
+    }, []);
+
+    // ── Cleanup on unmount ────────────────────────────────────────────────────
+    useEffect(() => () => stopStream(), []);
+
+    const stopStream = () => {
+        streamRef.current?.getTracks().forEach(t => t.stop());
+        streamRef.current = null;
+    };
+
+    // ── Open scanner — near-instant because everything is preloaded ───────────
+    const openScanner = async () => {
+        setIsOpen(true);
+        activeRef.current = true;
+
+        // Ensure preload finished (should already be done)
+        if (!modelsReady || cachedProfiles.length === 0 || !cachedMatcher) {
+            setStatus('loading');
+            setMessage('Chargement...');
+            await preloadFaceEngine();
+            if (!modelsReady || !cachedMatcher) {
+                setStatus('error');
+                setMessage('Aucun profil facial enregistré');
+                return;
+            }
+        }
+
+        // Security check
+        if (!navigator.mediaDevices?.getUserMedia) {
+            toastError('Non sécurisé', 'La caméra nécessite HTTPS ou localhost.');
+            setIsOpen(false);
+            return;
+        }
+
+        try {
+            // Start camera (only takes ~200ms after permission granted)
+            setStatus('loading');
+            setMessage('Activation caméra...');
             const s = await navigator.mediaDevices.getUserMedia({
                 video: { width: 640, height: 480, facingMode: 'user' }
             });
-            setStream(s);
+            streamRef.current = s;
             if (videoRef.current) videoRef.current.srcObject = s;
 
+            // Start scanning immediately
             setStatus('scanning');
-            setMessage('Scanner actif');
-        } catch (err: any) {
-            toastError('Erreur', 'Impossible de démarrer le scanner');
+            setMessage('Regardez la caméra...');
+        } catch (err) {
+            console.error(err);
+            toastError('Erreur', 'Impossible d\'accéder à la caméra');
             setStatus('error');
+            setMessage('Erreur caméra');
         }
     };
 
-    // ── Close scanner ─────────────────────────────────────────────────────────
-    const closeScanner = () => {
+    const closeScanner = useCallback(() => {
+        activeRef.current = false;
         stopStream();
         setIsOpen(false);
         setStatus('idle');
-        setMessage('Prêt');
-    };
+        setMessage('');
+    }, []);
 
-    // ── Scan loop — pure client-side matching ─────────────────────────────────
+    // ── Scan loop ─────────────────────────────────────────────────────────────
     useEffect(() => {
-        if (!isOpen || !stream || status !== 'scanning') return;
+        if (!isOpen || status !== 'scanning') return;
 
-        let active      = true;
-        let hitCount    = 0;
+        let hitCount     = 0;
         let lastUserId: string | null = null;
-        let lastDescriptor: Float32Array | null = null;
-        let hasBlinked  = false; // Liveness check
-
-        const getEAR = (eye: faceapi.FaceLandmarks68['getLeftEye' | 'getRightEye']) => {
-            const p1 = eye[0], p2 = eye[1], p3 = eye[2], p4 = eye[3], p5 = eye[4], p6 = eye[5];
-            const dist = (a: faceapi.Point, b: faceapi.Point) => Math.sqrt((a.x-b.x)**2 + (a.y-b.y)**2);
-            return (dist(p2, p6) + dist(p3, p5)) / (2 * dist(p1, p4));
-        };
+        let lastDesc: Float32Array | null = null;
+        let done         = false;
 
         const scan = async () => {
-            if (!active || !videoRef.current || !matcherRef.current) return;
-            if (videoRef.current.readyState < 2) {
-                if (active) setTimeout(scan, 150);
+            if (done || !activeRef.current) return;
+            const vid = videoRef.current;
+            const matcher = cachedMatcher;
+            if (!vid || !matcher) return;
+
+            // Wait for video to be ready
+            if (vid.readyState < 2) {
+                setTimeout(scan, 100);
                 return;
             }
 
             try {
                 const det = await faceapi
-                    .detectSingleFace(videoRef.current, new faceapi.SsdMobilenetv1Options({ minConfidence: MIN_CONFIDENCE }))
+                    .detectSingleFace(vid, new faceapi.SsdMobilenetv1Options({ minConfidence: MIN_CONFIDENCE }))
                     .withFaceLandmarks()
                     .withFaceDescriptor();
 
-                if (!det || !active) {
-                    if (active) setTimeout(scan, SCAN_INTERVAL_MS);
+                if (!det) {
+                    if (hitCount > 0) {
+                        hitCount = 0;
+                        lastUserId = null;
+                        setMessage('Regardez la caméra...');
+                    }
+                    if (!done) setTimeout(scan, SCAN_INTERVAL_MS);
                     return;
                 }
 
-                // --- Blink Detection (Liveness) ---
-                const leftEAR = getEAR(det.landmarks.getLeftEye());
-                const rightEAR = getEAR(det.landmarks.getRightEye());
-                const ear = (leftEAR + rightEAR) / 2;
-                
-                if (ear < 0.26) { // Seuil de clignement plus sensible
-                    hasBlinked = true;
+                // Find best match
+                const best = matcher.findBestMatch(det.descriptor);
+
+                // Anti-confusion: compute distance to 2nd-best candidate
+                let gap = 1.0;
+                if (cachedProfiles.length >= 2) {
+                    const others = cachedProfiles
+                        .filter(p => String(p.id) !== best.label)
+                        .map(p => Math.min(...p.descriptors.map(d =>
+                            faceapi.euclideanDistance(det.descriptor, new Float32Array(d))
+                        )));
+                    const secondDist = Math.min(...others);
+                    gap = secondDist - best.distance;
                 }
 
-                // Match locally
-                const result = matcherRef.current.findBestMatch(det.descriptor);
-
-                if (result.label === 'unknown') {
-                    hitCount    = 0;
-                    lastUserId  = null;
-                    setMessage('Visage non reconnu');
-                    if (active) setTimeout(scan, SCAN_INTERVAL_MS);
+                if (best.label === 'unknown' || gap < MIN_GAP) {
+                    hitCount   = 0;
+                    lastUserId = null;
+                    setMessage(best.label === 'unknown' ? 'Visage non reconnu' : 'Repositionnez votre visage...');
+                    if (!done) setTimeout(scan, SCAN_INTERVAL_MS);
                     return;
                 }
 
-                if (result.label === lastUserId) {
+                // Consecutive hit accumulation
+                if (best.label === lastUserId) {
                     hitCount++;
+                    lastDesc = det.descriptor;
                 } else {
-                    hitCount = 1;
-                    lastUserId = result.label;
-                    lastDescriptor = det.descriptor;
+                    hitCount   = 1;
+                    lastUserId = best.label;
+                    lastDesc   = det.descriptor;
                 }
 
-                if (hitCount < REQUIRED_HITS) {
-                    setMessage(`Analyse... (${hitCount}/${REQUIRED_HITS})`);
-                    if (active) setTimeout(scan, SCAN_INTERVAL_MS);
+                if (hitCount < MIN_CONFIRM_HITS) {
+                    setMessage(`Analyse... ${hitCount}/${MIN_CONFIRM_HITS}`);
+                    if (!done) setTimeout(scan, SCAN_INTERVAL_MS);
                     return;
                 }
 
-                // Check liveness before proceeding
-                if (!hasBlinked) {
-                    setMessage('CLIGNEZ DES YEUX POUR VALIDER');
-                    if (active) setTimeout(scan, 200);
-                    return;
-                }
-
-                // ✅ Confirmed + Alive
-                active = false;
-                const profile = profilesRef.current.find(p => String(p.id) === result.label);
+                // ✅ Match confirmed — request token immediately (no blink required)
+                done = true;
+                const profile = cachedProfiles.find(p => String(p.id) === best.label);
                 setMessage(`Identification de ${profile?.name || 'utilisateur'}...`);
 
                 try {
                     const { data } = await api.post('/face/token', {
-                        user_id:    parseInt(result.label),
-                        descriptor: Array.from(lastDescriptor!),
+                        user_id:    parseInt(best.label),
+                        descriptor: Array.from(lastDesc!),
                     });
 
                     if (data?.access_token) {
@@ -220,41 +247,50 @@ export const FaceLogin = ({ onSuccess }: FaceLoginProps) => {
                         localStorage.setItem('token', data.access_token);
                         if (data.refresh_token) localStorage.setItem('refresh_token', data.refresh_token);
                         localStorage.setItem('user', JSON.stringify(data.user));
-                        setTimeout(() => { onSuccess(data.user); closeScanner(); }, 300);
+                        // Redirect immediately — no artificial delay
+                        onSuccess(data.user);
                     }
                 } catch (tokenErr: any) {
-                    const detail = tokenErr.response?.data?.detail ?? 'Erreur de vérification';
+                    const detail = tokenErr.response?.data?.detail ?? 'Vérification échouée';
                     setMessage(detail);
-                    // Resume scanning after a short pause
+                    // Resume scanning after a brief pause
                     hitCount   = 0;
                     lastUserId = null;
-                    active     = true;
-                    setTimeout(scan, 1000);
+                    hasBlinked = false;
+                    lastDesc   = null;
+                    done       = false;
+                    setTimeout(scan, 1200);
                 }
 
             } catch (err) {
-                console.error('Scan error:', err);
-                if (active) setTimeout(scan, SCAN_INTERVAL_MS);
+                if (!done) setTimeout(scan, SCAN_INTERVAL_MS);
             }
         };
 
         scan();
-        return () => { active = false; };
-    }, [isOpen, stream, status]);
+        return () => { done = true; };
+    }, [isOpen, status]);
 
     // ─────────────────────────────────────────────────────────────────────────
+    const isBlinkMsg = message.includes('CLIGNEZ');
+
     return (
         <div className="w-full">
-            {/* Trigger button */}
+            {/* Trigger button — shows preload status */}
             <button
                 type="button"
                 onClick={openScanner}
                 className="w-full h-14 relative flex items-center justify-center gap-3 rounded-2xl bg-white/5 border border-white/10 text-white hover:bg-white/10 transition-all font-bold overflow-hidden group shadow-lg"
             >
                 <div className="p-2 bg-blue-500/20 rounded-lg text-blue-400 group-hover:scale-110 transition-transform">
-                    <Camera size={20} />
+                    {engineReady ? <Zap size={20} /> : <Camera size={20} />}
                 </div>
-                <span className="text-[0.7rem] uppercase tracking-[0.2em]">Authentification Biométrique</span>
+                <span className="text-[0.7rem] uppercase tracking-[0.2em]">
+                    {engineReady ? 'Connexion Biométrique Instantanée' : 'Authentification Biométrique'}
+                </span>
+                {engineReady && (
+                    <div className="absolute right-4 size-2 rounded-full bg-emerald-400 animate-pulse" />
+                )}
             </button>
 
             {/* Scanner overlay */}
@@ -262,10 +298,12 @@ export const FaceLogin = ({ onSuccess }: FaceLoginProps) => {
                 <div className="fixed inset-0 z-[10000] flex flex-col items-center justify-center p-4 bg-slate-950/98 backdrop-blur-3xl overflow-y-auto">
 
                     {/* Header */}
-                    <div className="text-center mb-8 animate-in fade-in slide-in-from-top-4 duration-500">
+                    <div className="text-center mb-8 animate-in fade-in slide-in-from-top-4 duration-300">
                         <div className="inline-flex items-center gap-3 bg-blue-500/10 border border-blue-500/20 px-6 py-2 rounded-full mb-4">
                             <ShieldCheck size={16} className="text-blue-400" />
-                            <h3 className="text-[0.65rem] font-black uppercase tracking-[0.3em] text-blue-400">Scanner Biométrique</h3>
+                            <h3 className="text-[0.65rem] font-black uppercase tracking-[0.3em] text-blue-400">
+                                Scanner Biométrique
+                            </h3>
                         </div>
                         <h2 className="text-4xl font-black text-white uppercase tracking-tighter">Authentification</h2>
                     </div>
@@ -280,24 +318,21 @@ export const FaceLogin = ({ onSuccess }: FaceLoginProps) => {
                         </button>
 
                         <div className="relative w-full h-full bg-black flex items-center justify-center overflow-hidden">
-                            {/* Live video */}
                             <video
                                 ref={videoRef}
                                 autoPlay muted playsInline
-                                className={`w-full h-full object-cover transition-opacity duration-700
+                                className={`w-full h-full object-cover transition-opacity duration-500
                                     ${status === 'scanning' || status === 'success' ? 'opacity-60' : 'opacity-0'}
-                                    grayscale-[0.3] scale-110`}
+                                    scale-110`}
                             />
 
-                            {/* HUD overlay */}
+                            {/* Scanning HUD */}
                             <div className="absolute inset-0 flex items-center justify-center p-8 pointer-events-none z-10">
                                 <div className="relative aspect-square h-full max-h-[400px] border-2 border-blue-500/20 rounded-full flex items-center justify-center overflow-hidden">
                                     <div className="absolute inset-0 bg-blue-500/5 backdrop-blur-[1px]" />
                                     {status === 'scanning' && (
-                                        <div className="absolute inset-x-0 h-1 bg-gradient-to-r from-transparent via-blue-400 to-transparent shadow-[0_0_30px_rgba(59,130,246,1)] animate-[laser_2.5s_infinite_linear] z-20" />
+                                        <div className="absolute inset-x-0 h-1 bg-gradient-to-r from-transparent via-blue-400 to-transparent shadow-[0_0_30px_rgba(59,130,246,1)] animate-[laser_2s_infinite_linear] z-20" />
                                     )}
-                                    <div className="absolute top-0 left-1/2 -translate-x-1/2 w-20 h-1 bg-blue-500 shadow-[0_0_20px_rgba(59,130,246,0.8)]" />
-                                    <div className="absolute bottom-0 left-1/2 -translate-x-1/2 w-20 h-1 bg-blue-500 shadow-[0_0_20px_rgba(59,130,246,0.8)]" />
                                 </div>
                                 {status === 'scanning' && (
                                     <>
@@ -320,10 +355,7 @@ export const FaceLogin = ({ onSuccess }: FaceLoginProps) => {
                                 <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 bg-slate-950 z-20">
                                     <AlertCircle className="text-red-400" size={48} />
                                     <p className="text-red-400 font-black text-sm text-center px-8">{message}</p>
-                                    <button
-                                        onClick={closeScanner}
-                                        className="mt-4 px-6 py-2 bg-white/10 rounded-xl text-white text-xs font-bold uppercase tracking-widest hover:bg-white/20 transition"
-                                    >
+                                    <button onClick={closeScanner} className="mt-4 px-6 py-2 bg-white/10 rounded-xl text-white text-xs font-bold uppercase tracking-widest hover:bg-white/20 transition">
                                         Fermer
                                     </button>
                                 </div>
@@ -331,7 +363,7 @@ export const FaceLogin = ({ onSuccess }: FaceLoginProps) => {
 
                             {/* Success */}
                             {status === 'success' && (
-                                <div className="absolute inset-0 bg-emerald-500/20 backdrop-blur-md z-30 flex flex-col items-center justify-center animate-in zoom-in duration-300">
+                                <div className="absolute inset-0 bg-emerald-500/20 backdrop-blur-md z-30 flex flex-col items-center justify-center animate-in zoom-in duration-200">
                                     <div className="p-10 bg-slate-950/90 rounded-full border-4 border-emerald-500 shadow-[0_0_80px_rgba(16,185,129,0.6)]">
                                         <UserCheck size={100} className="text-emerald-400" />
                                     </div>
@@ -342,16 +374,17 @@ export const FaceLogin = ({ onSuccess }: FaceLoginProps) => {
                     </div>
 
                     {/* Status bar */}
-                    <div className="mt-10 flex flex-col items-center gap-3">
+                    <div className="mt-8 flex flex-col items-center gap-3">
                         <div className="flex items-center gap-3">
                             <div className={`size-3 rounded-full transition-colors duration-300
-                                ${status === 'scanning' ? (message === 'CLIGNEZ DES YEUX POUR VALIDER' ? 'bg-amber-500 animate-bounce' : 'bg-blue-500 animate-pulse') :
-                                  status === 'success'  ? 'bg-emerald-500' :
-                                  status === 'error'    ? 'bg-red-500' :
-                                  'bg-slate-700'}`}
+                                ${status === 'scanning'
+                                    ? (isBlinkMsg ? 'bg-amber-500 animate-bounce' : 'bg-blue-500 animate-pulse')
+                                    : status === 'success' ? 'bg-emerald-500'
+                                    : status === 'error'   ? 'bg-red-500'
+                                    : 'bg-slate-700'}`}
                             />
-                            <span className={`text-sm font-black uppercase tracking-[0.3em] transition-colors duration-300 ${message === 'CLIGNEZ DES YEUX POUR VALIDER' ? 'text-amber-400' : 'text-slate-400'}`}>
-                                {message}
+                            <span className={`text-sm font-black uppercase tracking-[0.3em] ${isBlinkMsg ? 'text-amber-400' : 'text-slate-400'}`}>
+                                {message || 'Initialisation...'}
                             </span>
                         </div>
                         <p className="text-[0.6rem] text-slate-600 font-bold uppercase tracking-widest">GMAO PRO — Session Biométrique Sécurisée</p>

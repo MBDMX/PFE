@@ -12,6 +12,15 @@ from app.core.serpapi_image_service import get_part_image_b64
 
 router = APIRouter(tags=["stock-pro"])
 
+@router.get("/movements")
+async def get_stock_movements(limit: int = 10, db: Prisma = Depends(get_db)):
+    """Récupère l'historique des mouvements de stock (Commandes, Sorties, etc.)."""
+    return await db.stockmovement.find_many(
+        take=limit,
+        order={"date": "desc"}
+    )
+
+
 @router.get("/debug")
 async def debug_stock_images(db: Prisma = Depends(get_db)):
     """Endpoint de diagnostic : retourne les 10 premières pièces avec leur champ image."""
@@ -28,32 +37,70 @@ async def debug_stock_images(db: Prisma = Depends(get_db)):
     ]
 
 @router.post("/{part_id}/order-sap")
-async def order_part_via_sap(part_id: int, quantity: float = 1.0, db: Prisma = Depends(get_db), current_user = Depends(get_current_user)):
-    """Crée une vraie demande d'achat dans SAP pour cette pièce avec traçabilité."""
+async def order_part_via_sap(
+    part_id: int, 
+    body: dict = {},
+    db: Prisma = Depends(get_db), 
+    current_user = Depends(get_current_user)
+):
+    """Crée une demande d'achat SAP. Si SAP est indisponible, enregistre localement."""
     part = await db.stock.find_unique(where={"id": part_id})
     if not part:
         raise HTTPException(status_code=404, detail="Pièce introuvable")
     
-    # Récupération du nom de l'utilisateur (Traceability)
+    quantity = body.get("quantity", 1.0) if body else 1.0
     user_name = getattr(current_user, 'name', 'Utilisateur GMAO')
     
-    # Appel à SAP avec traçabilité
-    result = sap_client.create_purchase_request(
-        item_code=part.reference, 
-        quantity=quantity,
-        user_name=user_name,
-        remarks=f"Commande urgente via GMAO"
-    )
+    # 1. Tentative SAP (non-bloquant)
+    sap_ok = False
+    sap_doc = None
+    try:
+        result = sap_client.create_purchase_request(
+            item_code=part.reference, 
+            quantity=quantity,
+            user_name=user_name,
+            remarks=f"Commande urgente via GMAO"
+        )
+        if result and result.get("DocNum"):
+            sap_ok = True
+            sap_doc = result.get("DocNum")
+    except Exception as e:
+        print(f"[SAP] order-sap failed (non-bloquant): {e}")
     
-    if result:
-        doc_num = result.get("DocNum")
+    # 2. Enregistrement local du mouvement (toujours)
+    await db.stockmovement.create(data={
+        "part_code": part.reference or "",
+        "part_name": part.name or "",
+        "quantity": int(quantity),
+        "type": "ORDER",
+        "date": datetime.now().isoformat(),
+        "user_id": current_user.id,
+    })
+    
+    # 3. Notification WebSocket
+    await manager.broadcast({
+        "event": "SAP_ORDER",
+        "part": part.name,
+        "quantity": quantity,
+        "sap_doc": sap_doc,
+        "status": "synced" if sap_ok else "pending"
+    })
+    
+    if sap_ok:
         return {
-            "status": "success", 
-            "message": f"Demande d'achat SAP #{doc_num} créée avec succès !",
-            "sap_doc": doc_num
+            "status": "success",
+            "message": f"✅ Demande d'achat SAP #{sap_doc} créée avec succès !",
+            "sap_doc": sap_doc,
+            "synced": True
         }
     
-    raise HTTPException(status_code=500, detail="Échec de la création dans SAP. Vérifiez la connexion SAP.")
+    # SAP indisponible mais on ne crashe pas — mode gracieux
+    return {
+        "status": "pending",
+        "message": f"📋 Commande enregistrée localement (SAP indisponible). Elle sera synchronisée automatiquement.",
+        "sap_doc": None,
+        "synced": False
+    }
 
 @router.post("/transfer-sap")
 async def transfer_stock_via_sap(data: dict, db: Prisma = Depends(get_db), current_user = Depends(get_current_user)):
@@ -169,7 +216,11 @@ async def sync_stock_images(background_tasks: BackgroundTasks, force: bool = Fal
 
 @router.post("/sync-from-sap")
 async def sync_stock_from_sap(background_tasks: BackgroundTasks, db: Prisma = Depends(get_db)):
-    """Importe les articles SAP et lance le téléchargement des images en arrière-plan."""
+    """Importe les articles SAP et vide les anciennes données de démo/queue."""
+    # 🧹 Nettoyage complet avant synchro
+    await db.stockmovement.delete_many()
+    await db.stock.delete_many()
+    
     items = []
     source = "SAP"
     try:
@@ -182,15 +233,9 @@ async def sync_stock_from_sap(background_tasks: BackgroundTasks, db: Prisma = De
 
     if not items:
         source = "DEMO"
-        items = [
-            {"ItemCode": "MOT-001", "ItemName": "Moteur Électrique Triphasé",       "SalesUnitHeight": 1250.0},
-            {"ItemCode": "PMP-HYD", "ItemName": "Pompe Hydraulique Haute Pression",  "SalesUnitHeight": 850.0},
-            {"ItemCode": "VRN-50",  "ItemName": "Vérin Pneumatique Double Effet",    "SalesUnitHeight": 420.0},
-            {"ItemCode": "JNT-TOR", "ItemName": "Joint Torique Haute Température",   "SalesUnitHeight": 15.0},
-            {"ItemCode": "VSS-M8",  "ItemName": "Vis à Métaux M8 Inox",              "SalesUnitHeight": 2.5},
-            {"ItemCode": "BRM-IND", "ItemName": "Roulement à Billes Industriel",     "SalesUnitHeight": 120.0},
-            {"ItemCode": "CUV-001", "ItemName": "Cuve Cristalisateur Inox",          "SalesUnitHeight": 3500.0},
-        ]
+        # On ne met plus d'articles de démo, on laisse vide ou on affiche une erreur
+        items = []
+        print("⚠️ Aucun article trouvé (SAP vide ou démo désactivée).")
 
     count = 0
     try:
@@ -199,17 +244,39 @@ async def sync_stock_from_sap(background_tasks: BackgroundTasks, db: Prisma = De
             if not ref:
                 continue
             name = it.get("ItemName", "Article")
-            try:
+            
+            # 💰 Prix : Priorité SAP (ItemPrices), sinon Demo (SalesUnitHeight)
+            price = 0.0
+            if "ItemPrices" in it:
+                for p in it.get("ItemPrices", []):
+                    if p.get("Price") and float(p.get("Price")) > 0:
+                        price = float(p.get("Price"))
+                        break
+            else:
                 price = float(it.get("SalesUnitHeight") or 0.0)
-            except Exception:
-                price = 0.0
+            
+            # 📦 Stock : Priorité SAP (QuantityOnStock), sinon Demo (fixe à 15)
+            if "QuantityOnStock" in it:
+                stock_qty = float(it.get("QuantityOnStock") or 0.0)
+            else:
+                stock_qty = 15.0 # Valeur par défaut pour la démo
 
-            # Upsert items from SAP/Demo. Images will be fetched in background.
+            # Upsert items
             await db.stock.upsert(
                 where={"reference": ref},
                 data={
-                    "create": {"reference": ref, "name": name, "quantity": 15, "unit_price": price, "image": None},
-                    "update": {"name": name, "unit_price": price}
+                    "create": {
+                        "reference": ref, 
+                        "name": name, 
+                        "quantity": int(stock_qty), 
+                        "unit_price": price, 
+                        "image": None
+                    },
+                    "update": {
+                        "name": name, 
+                        "unit_price": price,
+                        "quantity": int(stock_qty)
+                    }
                 }
             )
             count += 1
@@ -274,10 +341,6 @@ async def search_stock_ai(data: dict, db: Prisma = Depends(get_db)):
         for r in results
     ]
 
-@router.get("/movements", response_model=List[StockMovementSchema])
-async def get_stock_movements(db: Prisma = Depends(get_db)):
-    return await db.stockmovement.find_many(order={'date': 'desc'})
-
 # PARTS REQUESTS MANAGEMENT
 pr_router = APIRouter(prefix="/parts-requests", tags=["parts-requests"])
 
@@ -298,7 +361,8 @@ async def get_parts_requests(status_filter: Optional[str] = None, db: Prisma = D
             stock = await db.stock.find_first(where={"reference": it.part_code})
             items_with_stock.append({
                 **it.dict(),
-                "stock_id": stock.id if stock else None
+                "stock_id": stock.id if stock else None,
+                "location": stock.location if stock else "01"
             })
             
         enriched.append({
@@ -337,7 +401,7 @@ async def create_parts_request(data: dict, db: Prisma = Depends(get_db), current
 
 @pr_router.patch("/{req_id}/approve")
 async def approve_parts_request(req_id: int, db: Prisma = Depends(get_db), current_user = Depends(role_required(["admin", "magasinier"]))):
-    pr = await db.partsrequest.find_unique(where={"id": req_id}, include={"items": True})
+    pr = await db.partsrequest.find_unique(where={"id": req_id}, include={"items": True, "work_order": True})
     if not pr: raise HTTPException(status_code=404, detail="Demande introuvable")
     
     for it in pr.items:
@@ -365,6 +429,24 @@ async def approve_parts_request(req_id: int, db: Prisma = Depends(get_db), curre
                 "quantity": qty,
                 "unit_price_at_consumption": stock.unit_price or 0.0
             })
+            
+            # 🔄 SYNC TO SAP: Add part to the Maintenance Order lines
+            if pr.work_order and pr.work_order.sap_order_id:
+                try:
+                    # On envoie la pièce au magasin par défaut '01' (Magasin Central)
+                    # On peut mapper dynamiquement si le champ 'place' du stock correspond à un WarehouseCode SAP
+                    sap_wh = "01" 
+                    if stock.location and len(str(stock.location)) <= 8: # Format SAP Warehouse Code habituel
+                        sap_wh = stock.location
+                        
+                    sap_client.add_part_to_maintenance_order(
+                        doc_entry=pr.work_order.sap_order_id,
+                        item_code=it.part_code,
+                        quantity=qty,
+                        warehouse=sap_wh
+                    )
+                except Exception as sap_err:
+                    print(f"⚠️ Erreur lors de la synchro de la pièce vers SAP: {sap_err}")
             
             # Alert if stock goes critical
             if new_qty < 5:

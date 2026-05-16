@@ -1,6 +1,6 @@
 import { 
-  Package, MapPin, ShoppingCart, ArrowUpDown, 
-  CheckCircle2, AlertCircle, Settings2, Wrench, 
+  Package, MapPin, ShoppingCart, ArrowUpDown, ArrowRightLeft,
+  CheckCircle2, AlertCircle, Wrench, 
   Zap, Droplets, Cpu, Box 
 } from 'lucide-react';
 import { StockItem } from './types';
@@ -12,6 +12,7 @@ interface Props {
   isLoading: boolean;
   canOrder: boolean;
   onOrder: (item: StockItem) => void;
+  onTransfer: (item: StockItem) => void;
   sortConfig?: { key: string; direction: 'asc' | 'desc' } | null;
   onSort?: (key: string) => void;
 }
@@ -50,7 +51,6 @@ function PartImage({ item }: { item: StockItem }) {
           )}
         </div>
         
-        {/* Feedback Loop Overlay */}
         {!item.image_verified && (
           <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover/img:opacity-100 transition-opacity bg-slate-900/60 rounded-xl backdrop-blur-[2px]">
             <button 
@@ -72,7 +72,6 @@ function PartImage({ item }: { item: StockItem }) {
     );
   }
 
-  // Level 3: Stylish Category Icon Fallback
   return (
     <div className="size-12 rounded-xl border border-blue-500/20 bg-blue-500/5 shrink-0 flex items-center justify-center shadow-inner group-hover:bg-blue-500/10 transition-colors">
       {getCategoryIcon(item.name || item.category || '')}
@@ -82,27 +81,14 @@ function PartImage({ item }: { item: StockItem }) {
 
 function getCategoryIcon(context: string) {
   const n = (context || '').toLowerCase();
-  
-  // High-quality technical mapping
-  if (n.includes('pneuma') || n.includes('verin') || n.includes('air')) 
-    return <Box className="text-blue-400/60" size={20} />;
-    
-  if (n.includes('hydraul') || n.includes('pompe') || n.includes('huile')) 
-    return <Droplets className="text-cyan-400/60" size={20} />;
-    
-  if (n.includes('electr') || n.includes('moteur') || n.includes('cable') || n.includes('capteur')) 
-    return <Zap className="text-yellow-400/60" size={20} />;
-    
-  if (n.includes('mecani') || n.includes('roulement') || n.includes('vis') || n.includes('boulon')) 
-    return <Wrench className="text-slate-400/60" size={20} />;
-
-  if (n.includes('control') || n.includes('carte') || n.includes('cpu')) 
-    return <Cpu className="text-purple-400/60" size={20} />;
-    
+  if (n.includes('pneuma') || n.includes('verin') || n.includes('air')) return <Box className="text-blue-400/60" size={20} />;
+  if (n.includes('hydraul') || n.includes('pompe') || n.includes('huile')) return <Droplets className="text-cyan-400/60" size={20} />;
+  if (n.includes('electr') || n.includes('moteur') || n.includes('cable') || n.includes('capteur')) return <Zap className="text-yellow-400/60" size={20} />;
+  if (n.includes('mecani') || n.includes('roulement') || n.includes('vis') || n.includes('boulon')) return <Wrench className="text-slate-400/60" size={20} />;
+  if (n.includes('control') || n.includes('carte') || n.includes('cpu')) return <Cpu className="text-purple-400/60" size={20} />;
   return <Package className="text-slate-600/40" size={20} />;
 }
 
-/** Loading Skeleton for the table rows */
 function TableSkeleton({ canOrder }: { canOrder: boolean }) {
   return (
     <>
@@ -127,19 +113,12 @@ function TableSkeleton({ canOrder }: { canOrder: boolean }) {
   );
 }
 
-export default function InventoryTable({ items, isLoading, canOrder, onOrder, sortConfig, onSort }: Props) {
-  
+export default function InventoryTable({ items, isLoading, canOrder, onOrder, onTransfer, sortConfig, onSort }: Props) {
   const SortHeader = ({ label, sortKey }: { label: string; sortKey: string }) => (
-    <th 
-      onClick={() => onSort?.(sortKey)}
-      className="cursor-pointer hover:text-blue-400 transition-colors group"
-    >
+    <th onClick={() => onSort?.(sortKey)} className="cursor-pointer hover:text-blue-400 transition-colors group">
       <div className="flex items-center gap-2">
         {label}
-        <ArrowUpDown 
-          size={12} 
-          className={`transition-opacity ${sortConfig?.key === sortKey ? 'opacity-100 text-blue-400' : 'opacity-20 group-hover:opacity-50'}`} 
-        />
+        <ArrowUpDown size={12} className={`transition-opacity ${sortConfig?.key === sortKey ? 'opacity-100 text-blue-400' : 'opacity-20 group-hover:opacity-50'}`} />
       </div>
     </th>
   );
@@ -149,9 +128,7 @@ export default function InventoryTable({ items, isLoading, canOrder, onOrder, so
       <div className="flex items-center gap-3 px-2 mb-6">
         <Package size={18} className="text-slate-500" />
         <h3 className="text-lg font-black text-white uppercase tracking-widest">Inventaire Complet</h3>
-        <span className="text-[0.65rem] font-bold text-slate-500 uppercase tracking-widest">
-          {items.length} pièces en base
-        </span>
+        <span className="text-[0.65rem] font-bold text-slate-500 uppercase tracking-widest">{items.length} pièces en base</span>
       </div>
 
       <div className="azure-card p-0 overflow-hidden shadow-2xl">
@@ -185,29 +162,15 @@ export default function InventoryTable({ items, isLoading, canOrder, onOrder, so
                       <div className="flex items-center gap-4 py-2">
                         <PartImage item={item} />
                         <div>
-                          <div className="font-bold text-white group-hover:text-blue-400 transition-colors uppercase tracking-tight text-sm">
-                            {item.name}
-                          </div>
-                          <div className="text-[0.7rem] font-bold text-slate-500 uppercase tracking-widest mt-1">
-                            {item.reference}
-                          </div>
+                          <div className="font-bold text-white group-hover:text-blue-400 transition-colors uppercase tracking-tight text-sm">{item.name}</div>
+                          <div className="text-[0.7rem] font-bold text-slate-500 uppercase tracking-widest mt-1">{item.reference}</div>
                         </div>
                       </div>
                     </td>
                     <td>
                       <div className="flex items-center gap-3">
-                        <div
-                          className={`size-2.5 rounded-full ${
-                            item.quantity <= 5
-                              ? 'bg-rose-500 shadow-[0_0_12px_rgba(244,63,94,0.6)] animate-pulse'
-                              : item.quantity <= 15
-                              ? 'bg-amber-400 shadow-[0_0_10px_rgba(251,191,36,0.4)]'
-                              : 'bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.4)]'
-                          }`}
-                        />
-                        <span className={`text-sm font-black ${item.quantity <= 5 ? 'text-rose-400' : 'text-white'}`}>
-                          {item.quantity}
-                        </span>
+                        <div className={`size-2.5 rounded-full ${item.quantity <= 5 ? 'bg-rose-500 shadow-[0_0_12px_rgba(244,63,94,0.6)] animate-pulse' : item.quantity <= 15 ? 'bg-amber-400 shadow-[0_0_10px_rgba(251,191,36,0.4)]' : 'bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.4)]'}`} />
+                        <span className={`text-sm font-black ${item.quantity <= 5 ? 'text-rose-400' : 'text-white'}`}>{item.quantity}</span>
                         <span className="text-[0.65rem] font-bold text-slate-600 uppercase">{item.unit}</span>
                       </div>
                     </td>
@@ -218,18 +181,13 @@ export default function InventoryTable({ items, isLoading, canOrder, onOrder, so
                       </div>
                     </td>
                     <td>
-                      <div className="font-black text-slate-300 tracking-widest text-sm">
-                        {item.unit_price ? `${item.unit_price.toFixed(3)} TND` : '—'}
-                      </div>
+                      <div className="font-black text-slate-300 tracking-widest text-sm">{item.unit_price ? `${item.unit_price.toFixed(3)} TND` : '—'}</div>
                     </td>
                     {canOrder && (
                       <td className="text-right">
-                        <div className="flex justify-end gap-2">
+                        <div className="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
                           <button
-                            onClick={() => {
-                              const qty = window.prompt(`Quantité de ${item.name} à transférer vers la maintenance :`, "1");
-                              if (qty) onTransfer?.(item.reference, parseFloat(qty));
-                            }}
+                            onClick={() => onTransfer?.(item)}
                             className="px-3 py-2 rounded-lg bg-white/5 text-slate-400 border border-white/10 font-bold text-[0.6rem] uppercase tracking-widest hover:bg-white/10 hover:text-white transition-all"
                             title="Transférer vers Maintenance"
                           >

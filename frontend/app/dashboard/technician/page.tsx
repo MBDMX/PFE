@@ -23,6 +23,7 @@ export default function TechnicianDashboard() {
     const workOrders = useLiveQuery(() => db.workOrders.toArray()) || [];
     const isLoading = useLiveQuery(() => db.workOrders.count()) === undefined;
     const [notifCount, setNotifCount] = useState(0);
+    const [techKpis, setTechKpis] = useState<any>(null);
 
     useEffect(() => {
         const fetchCount = () => {
@@ -57,6 +58,22 @@ export default function TechnicianDashboard() {
         }
         // Background sync
         gmaoApi.getWorkOrders().catch(() => { });
+
+        // Fetch backend KPIs for the technician
+        if (typeof window !== 'undefined') {
+            const token = localStorage.getItem('token');
+            if (token) {
+                try {
+                    const payload = JSON.parse(window.atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
+                    const tid = payload.id || payload.sub;
+                    if (tid) {
+                        gmaoApi.get(`/technician-stats/${tid}`)
+                            .then(setTechKpis)
+                            .catch(err => console.error("Error fetching tech KPIs:", err));
+                    }
+                } catch {}
+            }
+        }
     }, []);
 
     // ── KPIs ──
@@ -73,6 +90,16 @@ export default function TechnicianDashboard() {
             return sum + (new Date(o.closed_at!).getTime() - new Date(o.created_at!).getTime()) / 3600000;
         }, 0) / closedWithDates.length).toFixed(1)
         : '—';
+
+    // ── Formatting Helper ──
+    const formatDuration = (hours: number) => {
+        if (!hours || hours <= 0) return '—';
+        if (hours < 1) {
+            const mins = Math.round(hours * 60);
+            return `${mins}mn`;
+        }
+        return `${hours.toFixed(1)}h`;
+    };
 
     return (
         <div className="animate-in fade-in slide-in-from-bottom-4 duration-700 space-y-8 pb-10">
@@ -118,7 +145,7 @@ export default function TechnicianDashboard() {
             </header>
 
             {/* ── KPIs ── */}
-            {isLoading ? (
+            {isLoading || !techKpis || Array.isArray(techKpis) ? (
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                     {[1, 2, 3].map(i => (
                         <div key={i} className="azure-card p-5 h-28 animate-pulse bg-slate-900/60" />
@@ -126,9 +153,27 @@ export default function TechnicianDashboard() {
                 </div>
             ) : (
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                    <KPICard label="Taux de résolution" value={`${resolutionRate}%`} sub="Cible : > 85% ce mois" color="emerald" icon={CheckCircle} />
-                    <KPICard label="OT en retard" value={overdueCount} sub="Objectif : 0 — alerte si > 0" color="rose" icon={AlertTriangle} />
-                    <KPICard label="Délai moyen" value={avgHours === '—' ? '—' : `${avgHours}h`} sub="Cible : < 4h pour critiques" color="blue" icon={Timer} />
+                    <KPICard 
+                        label="Réactivité" 
+                        value={formatDuration(techKpis?.avg_intervention_delay_hours)} 
+                        sub="Cible : < 4h (Prise en charge)" 
+                        color="emerald" 
+                        icon={CheckCircle} 
+                    />
+                    <KPICard 
+                        label="OT Complétés" 
+                        value={techKpis?.closed_work_orders ?? 0} 
+                        sub={`${techKpis?.completion_rate ?? 0}% du total assigné`} 
+                        color="rose" 
+                        icon={AlertTriangle} 
+                    />
+                    <KPICard 
+                        label="Délai moyen" 
+                        value={formatDuration(techKpis?.avg_time_spent_hours)} 
+                        sub="Cible : < 4h (Temps de réparation)" 
+                        color="blue" 
+                        icon={Timer} 
+                    />
                 </div>
             )}
 

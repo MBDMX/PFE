@@ -100,17 +100,21 @@ async def enroll_face_multi(
 async def face_login(data: FaceDescriptorSchema):
     """
     Finds a user whose stored descriptor(s) match the input.
-    
-    Security thresholds (strict):
-      - THRESHOLD = 0.50  → Must be closer than 0.50 to match
-      - MIN_GAP   = 0.10  → The best match must be at least 0.10 better than 2nd best
-                            (prevents false positives when two faces are similar)
+
+    face-api.js uses EUCLIDEAN distance (NOT cosine similarity):
+      - Same person:      distance ≈ 0.30–0.45
+      - Different person: distance ≈ 0.60–1.0
+
+    Security thresholds:
+      - THRESHOLD = 0.45  → Must be within 0.45 euclidean distance to match
+      - MIN_GAP   = 0.12  → Best match must be at least 0.12 BETTER than 2nd best
+                            (prevents confusion between two enrolled users)
     """
     from app.db.session import prisma as db
 
-    # --- Strict thresholds ---
-    THRESHOLD = 0.75   # Increased from 0.60 for better tolerance
-    MIN_GAP   = 0.05   # Reduced from 0.10 to allow closer matches
+    # --- Euclidean distance thresholds (face-api.js) ---
+    THRESHOLD = 0.55   # Permissive enough for lighting/angle variation
+    MIN_GAP   = 0.08   # Matches frontend MIN_GAP
 
     try:
         log("[FACE LOGIN] Request received")
@@ -231,9 +235,10 @@ async def get_face_token(data: FaceTokenRequest, db: Prisma = Depends(get_db)):
     """
     Fast token endpoint called ONCE after the frontend locally confirmed a match.
     Re-verifies the descriptor server-side before issuing tokens (security).
-    Threshold is slightly relaxed (0.65) because we already know which user.
+    Slightly relaxed vs /face/login because we already know WHICH user to check against.
+    0.50 = allows minor lighting/angle variations between enrollment and login frames.
     """
-    THRESHOLD = 0.75
+    THRESHOLD = 0.60   # Relaxed: frontend already confirmed match, allow natural variation
 
     user = await db.user.find_unique(where={"id": data.user_id})
     if not user or not getattr(user, "face_descriptor", None):

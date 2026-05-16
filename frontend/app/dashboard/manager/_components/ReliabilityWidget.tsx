@@ -35,6 +35,15 @@ export default function ReliabilityWidget() {
         return () => clearInterval(interval);
     }, []);
 
+    const formatDuration = (hours: number) => {
+        if (!hours || hours <= 0) return '—';
+        if (hours < 1) {
+            const mins = Math.round(hours * 60);
+            return `${mins}mn`;
+        }
+        return `${hours.toFixed(1)}h`;
+    };
+
     if (loading) {
         return (
             <div className="azure-card p-6 h-full animate-pulse space-y-4">
@@ -82,7 +91,7 @@ export default function ReliabilityWidget() {
                 <div className="azure-card p-4 bg-amber-500/5 flex flex-col gap-1 items-center text-center">
                     <Clock size={18} className="text-amber-400 mb-1" />
                     <div className="text-xl font-black text-white">
-                        {data.total_corrective_ots > 0 ? `${data.mttr_hours.toFixed(1)}h` : 'N/A'}
+                        {data.total_corrective_ots > 0 ? formatDuration(data.mttr_hours) : 'N/A'}
                     </div>
                     <div className="text-[0.55rem] font-black uppercase tracking-wider text-slate-500">MTTR</div>
                     <div className="text-[0.5rem] font-bold text-slate-600 uppercase">Tps de réparation</div>

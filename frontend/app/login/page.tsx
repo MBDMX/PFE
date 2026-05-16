@@ -208,11 +208,11 @@ export default function LoginPage() {
 
             <FaceLogin 
               onSuccess={(user) => {
-                // FaceLogin already stores access_token + user in localStorage
-                // Force full page reload so auth context re-reads localStorage
-                const role = user?.role ?? JSON.parse(localStorage.getItem('user') || '{}').role;
-                const route = ROLE_ROUTES[role] ?? '/dashboard';
-                window.location.href = route;
+                // FaceLogin already stored token + user in localStorage.
+                // Use router.replace for instant navigation (no full page reload).
+                const role  = user?.role ?? JSON.parse(localStorage.getItem('user') || '{}').role;
+                const route = ROLE_ROUTES[role] ?? '/dashboard/technician';
+                router.replace(route);
               }}
             />
           </div>

@@ -218,49 +218,52 @@ async function handleDelete(endpoint: string, actionType: OfflineAction['type'])
 // Synchronization Logic
 // ────────────────────────────────────────────
 
-async function processSyncQueue() {
+async function processSyncQueue(force: boolean = false) {
     if (typeof window === 'undefined') return;
     
     const queue = await db.syncQueue
-        .filter(a => a.status === 'pending' || a.status === 'error')
+        .filter(a => a.status === 'pending' || (force && a.status === 'error'))
         .toArray();
     if (queue.length === 0) return;
 
     // Clés internes à ne jamais envoyer au backend
-    const INTERNAL_KEYS = ['offline', '_stock_updates', 'parts', 'steps', 'parts_requests', 
-                           'created_at', 'updated_at', 'sap_order_id', 'technician', 'machine'];
-
     for (const action of queue) {
         try {
-            await db.syncQueue.update(action.id!, { status: 'syncing' });
+            // Clean internal-only keys that might confuse the backend
+            // Note: 'parts' and 'steps' are NOT internal, they are used by the backend!
+            const INTERNAL_KEYS = ['offline', '_stock_updates', 'created_at', 'updated_at', 
+                                   'sap_order_id', 'technician', 'machine'];
             
-            // Nettoyer le payload : supprimer les clés internes avant envoi
-            const cleanPayload = action.payload ? Object.fromEntries(
-                Object.entries(action.payload).filter(([key]) => !INTERNAL_KEYS.includes(key))
-            ) : {};
+            const cleanPayload = { ...action.payload };
+            INTERNAL_KEYS.forEach(key => delete (cleanPayload as any)[key]);
+
+            console.log(`📡 Syncing action ${action.type} to ${action.endpoint}...`, cleanPayload);
 
             let res;
-            if (action.method === 'POST') res = await api.post(action.endpoint, cleanPayload);
-            else if (action.method === 'PATCH') res = await api.patch(action.endpoint, cleanPayload);
-            else if (action.method === 'DELETE') res = await api.delete(action.endpoint);
-            
-            await db.syncQueue.delete(action.id!);
-            console.log(`✅ Sync Success: ${action.type} -> ${action.endpoint}`);
-        } catch (err: any) {
-            if (err.response?.status === 404) {
-                console.warn(`🗑️ Skipping deleted resource: ${action.endpoint}`);
+            try {
+                if (action.method === 'POST') res = await api.post(action.endpoint, cleanPayload);
+                else if (action.method === 'PATCH') res = await api.patch(action.endpoint, cleanPayload);
+                else if (action.method === 'DELETE') res = await api.delete(action.endpoint);
+                
+                // Success: remove from queue
                 await db.syncQueue.delete(action.id!);
-            } else if (err.response?.status === 422) {
-                // 422 = le payload ne correspond pas au schéma backend → on supprime pour éviter la boucle infinie
-                console.warn(`⚠️ 422 on ${action.endpoint} — payload incompatible, dropping action`);
-                await db.syncQueue.delete(action.id!);
-            } else {
-                console.error(`Sync Failure for ${action.id}:`, err);
+                console.log(`✅ Action ${action.id} synced successfully.`);
+            } catch (err: any) {
+                const status = err.response?.status;
+                const detail = err.response?.data?.detail;
+                console.error(`❌ Sync failed for action ${action.id} (Status: ${status}):`, detail || err.message);
+                
+                // If 400/422, it's a validation error: mark it as error so user can see it
                 await db.syncQueue.update(action.id!, { 
                     status: 'error', 
-                    errorMessage: err.response?.data?.detail || err.message 
+                    errorMessage: Array.isArray(detail) ? detail.map((d:any) => d.msg).join(', ') : (detail || err.message)
                 });
+                
+                // We DON'T throw here anymore, to allow other items in the queue to sync
             }
+            console.log(`📡 Processed ${action.type} -> ${action.endpoint}`);
+        } catch (err: any) {
+            console.error(`Unexpected error in sync loop for ${action.id}:`, err);
         }
     }
 }
@@ -311,11 +314,6 @@ async function syncMasterData() {
         await syncTable(db.stock, stockRes);
         await syncTable(db.technicians, techRes);
         await syncTable(db.workOrders, woRes);
-
-        // ✅ Désactivé car SmartPartImage gère désormais le cache de manière plus efficace (Lazy Loading)
-        // if (stockRes.status === 'fulfilled') {
-        //     cacheStockImages(stockRes.value.data).catch(() => {});
-        // }
 
         const failures = [machinesRes, stockRes, techRes, woRes].filter(r => r.status === 'rejected').length;
         if (failures > 0) {
@@ -397,6 +395,10 @@ export const gmaoApi = {
         return handlePost(`/stock/${itemId}/order-sap`, { quantity, supplier_info: supplierInfo }, 'UPDATE_WORK_ORDER');
     },
 
+    transferStock: async (partReference: string, quantity: number) => {
+        return handlePost('/stock/transfer-sap', { item_code: partReference, quantity, from_wh: '01', to_wh: '02' }, 'UPDATE_WORK_ORDER');
+    },
+
     updateWorkOrder: (id: number | string, data: any) => handlePatch(`/work-orders/${id}`, data, 'UPDATE_WORK_ORDER'),
     deleteWorkOrder: (id: number | string) => handleDelete(`/work-orders/${id}`, 'DELETE_WORK_ORDER'),
 
@@ -419,10 +421,6 @@ export const gmaoApi = {
     getMachineFinancials: (machineId: number) => 
         handleGet(`/machines/${machineId}/financials`),
 
-    transferStock: async (data: { item_code: string, quantity: number, from_wh: string, to_wh: string }) => {
-        return handlePost('/stock/transfer-sap', data, 'CREATE_STOCK_MOVEMENT');
-    },
-
     getReliabilityKpis: () => handleGet('/kpi-reliability'),
     getTechnicians: () => handleGet('/technicians', db.technicians),
     _isSyncingInternal: false,
@@ -430,7 +428,7 @@ export const gmaoApi = {
         if (this._isSyncingInternal) return;
         this._isSyncingInternal = true;
         try {
-            await processSyncQueue();
+            await processSyncQueue(true);
             await syncMasterData();
         } finally {
             this._isSyncingInternal = false;
@@ -542,6 +540,11 @@ export const gmaoApi = {
     },
     syncMachinesFromSap: () => handlePost('/machines/sync-from-sap', {}, 'SYNC_SAP_MACHINES'),
     syncWorkOrdersFromSap: () => handlePost('/work-orders/sync-from-sap', {}, 'SYNC_SAP_OTS'),
+
+    // ADMIN SYSTEM & LOGS
+    getSystemLogs: () => handleGet('/system/logs'),
+    getSystemStatus: () => handleGet('/system/status'),
+    getMachineHealth: () => handleGet('/predictive/machine-health'),
 };
 
 export default api;

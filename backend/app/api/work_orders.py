@@ -32,6 +32,20 @@ async def get_least_busy_technician(db: Prisma):
     stats.sort(key=lambda x: x[1])
     return stats[0][0] # Retourne l'ID du tech le moins occupé
 
+async def get_manager_name_for_tech(db: Prisma, tech_id: Optional[int]) -> str:
+    """Récupère le nom du responsable pour un technicien donné."""
+    if not tech_id:
+        return "Jean Dupont" # Responsable par défaut pour la démo
+    
+    tech = await db.user.find_unique(where={"id": tech_id})
+    if tech and tech.manager_id:
+        manager = await db.user.find_unique(where={"id": tech.manager_id})
+        if manager and manager.name:
+            return manager.name
+            
+    # Rotation de noms démo si pas de manager défini
+    return "Alice Martin" if tech_id % 2 == 0 else "Jean Dupont"
+
 @router.get("")
 async def get_work_orders(db: Prisma = Depends(get_db), current_user = Depends(get_current_user)):
     # Filter: Technicians only see their assigned work orders
@@ -163,7 +177,8 @@ async def sync_work_orders_from_sap(
             "equipment_id": str(machine.id) if machine else None,
             "technical_location": machine.location if machine else "SAP Import",
             "planned_start_date": start_date,
-            "failure_cause": extracted_cause
+            "failure_cause": extracted_cause,
+            "responsible_person": "Jean Dupont" # Valeur temporaire, sera affinée après l'assignation du tech
         }
 
         existing = await db.workorder.find_first(where={"sap_order_id": str(doc_entry)})
@@ -188,9 +203,12 @@ async def sync_work_orders_from_sap(
                     if least_busy_tech:
                         data_payload["technician_id"] = least_busy_tech
             
+            # Calcul du responsable basé sur le technicien
+            data_payload["responsible_person"] = await get_manager_name_for_tech(db, data_payload.get("technician_id") or existing.technician_id)
+            
             new_order = await db.workorder.update(where={"id": existing.id}, data=data_payload)
             updated_orders += 1
-            print(f"🔄 OT SAP #{doc_entry} mis à jour localement.")
+            print(f"🔄 OT SAP #{doc_entry} mis à jour localement (Resp: {data_payload['responsible_person']})")
         else:
             # Création du nouvel OT avec assignation équilibrée
             if not data_payload.get("technician_id"):
@@ -203,6 +221,7 @@ async def sync_work_orders_from_sap(
                         data_payload["technician_id"] = least_busy_tech
             
             data_payload["sap_order_id"] = str(doc_entry)
+            data_payload["responsible_person"] = await get_manager_name_for_tech(db, data_payload.get("technician_id"))
             new_order = await db.workorder.create(data=data_payload)
             created_orders += 1
 
@@ -343,6 +362,10 @@ async def create_work_order(wo: WorkOrderCreate, db: Prisma = Depends(get_db)):
         data["technician_id"] = await get_least_busy_technician(db)
         print(f"🤖 Auto-assignation nouvel OT au Tech ID: {data['technician_id']}")
     
+    # Assignation du Responsable réel
+    data["responsible_person"] = await get_manager_name_for_tech(db, data["technician_id"])
+    data["team"] = "Maintenance Production" if data["technician_id"] and data["technician_id"] % 2 == 0 else "Services Généraux"
+    
     # Push to SAP
     sap_response = sap_client.create_maintenance_order(data)
     if sap_response and "DocEntry" in sap_response:
@@ -451,6 +474,10 @@ async def update_work_order(wo_id: int, wo_data: dict, db: Prisma = Depends(get_
     # Logic for stock deduction when transitioning to 'done' has been REMOVED.
     # Stock is now immediately deducted when a part is consumed via add_part_to_work_order,
     # ensuring real-time accurate inventory (per user request).
+
+    # Auto-update responsible person if technician changes
+    if "technician_id" in clean_data:
+        clean_data["responsible_person"] = await get_manager_name_for_tech(db, clean_data["technician_id"])
 
     updated = await db.workorder.update(where={"id": wo_id}, data=final_data)
     

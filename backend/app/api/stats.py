@@ -211,3 +211,39 @@ async def get_reliability_kpis(db: Prisma = Depends(get_db)):
         },
         "machine_breakdown": sorted(machine_breakdown, key=lambda x: x["failure_count"], reverse=True)[:10],
     }
+
+@router.get("/technician-stats/{tech_id}")
+async def get_technician_kpis(tech_id: int, db: Prisma = Depends(get_db)):
+    """Calculates specific KPIs for a technician (Average Time Spent, Intervention Delay)."""
+    # 1. Total and Closed Work Orders
+    wos = await db.workorder.find_many(where={"technician_id": tech_id})
+    done_statuses = {"done", "closed", "terminé", "fini"}
+    closed_wos = [w for w in wos if str(w.status).lower().strip() in done_statuses]
+    
+    # 2. Délai Moyen (Average Time Spent)
+    # Based on time_spent field (accumulated from work sessions)
+    time_spent_values = [w.time_spent for w in wos if w.time_spent and w.time_spent > 0]
+    avg_time_spent = round(sum(time_spent_values) / len(time_spent_values), 2) if time_spent_values else 0
+    
+    # 3. Intervention Delay (Creation -> Actual Start)
+    delays = []
+    for w in wos:
+        if w.actual_start_date and w.created_at:
+            try:
+                # Use the _parse_date helper if needed, but created_at is usually datetime
+                start = datetime.fromisoformat(str(w.actual_start_date).replace('Z', ''))
+                created = w.created_at
+                diff = (start - created).total_seconds() / 3600
+                if 0 < diff < 500: delays.append(diff)
+            except: pass
+            
+    avg_delay = round(sum(delays) / len(delays), 1) if delays else 0
+    
+    return {
+        "technician_id": tech_id,
+        "total_work_orders": len(wos),
+        "closed_work_orders": len(closed_wos),
+        "avg_time_spent_hours": avg_time_spent, # "Délai moyen de réalisation"
+        "avg_intervention_delay_hours": avg_delay, # "Réactivité"
+        "completion_rate": round((len(closed_wos) / len(wos)) * 100) if wos else 0
+    }

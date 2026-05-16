@@ -539,51 +539,62 @@ function ClientAppWrapper({ children }: { children: React.ReactNode }) {
           )}
         </nav>
 
-        {/* ── Network & Sync Indicator ── */}
-        <div className="mt-auto px-2 pb-6 space-y-3 border-t border-white/5 pt-6">
+        {/* ── Network & Sync Indicator (Version Binôme) ── */}
+        <div className="mt-auto px-3 pb-8 space-y-4 pt-6 border-t border-white/5">
           
           {/* 1. Network Status Pill */}
-          <div className={`px-4 py-2.5 rounded-2xl border flex items-center gap-3 transition-all duration-500 ${isOnline ? 'bg-emerald-500/10 border-emerald-500/20' : 'bg-rose-500/10 border-rose-500/30'}`}>
-            <div className={`size-2 rounded-full ${isOnline ? 'bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.5)]' : 'bg-rose-500 animate-pulse'}`} />
-            <span className={`text-[0.65rem] font-black uppercase tracking-widest ${isOnline ? 'text-emerald-500' : 'text-rose-500'}`}>
-              {isOnline ? '📡 EN LIGNE' : '⚠️ DÉCONNECTÉ'}
-            </span>
+          <div className={`px-5 py-3 rounded-full border transition-all duration-700 flex items-center gap-4 ${
+            isOnline 
+              ? 'bg-[#0d1a1a] border-emerald-500/20 text-emerald-500 shadow-[0_0_15px_rgba(16,185,129,0.05)]' 
+              : 'bg-[#1a101a] border-rose-500/30 text-rose-500 shadow-[0_0_20px_rgba(244,63,94,0.1)]'
+          }`}>
+            <div className={`size-2.5 rounded-full shrink-0 ${
+              isOnline 
+                ? 'bg-emerald-500 shadow-[0_0_12px_rgba(16,185,129,0.6)]' 
+                : 'bg-rose-500 animate-pulse shadow-[0_0_12px_rgba(244,63,94,0.6)]'
+            }`} />
+            <div className="flex items-center gap-2">
+              {!isOnline && <AlertTriangle size={14} className="text-yellow-400" />}
+              <span className="text-[0.7rem] font-black uppercase tracking-[0.2em] leading-none">
+                {isOnline ? 'MODE EN LIGNE' : 'CONNEXION PERDUE'}
+              </span>
+            </div>
           </div>
 
-          {/* 2. Unified Sync Status Block */}
-          <div className="space-y-2">
+          {/* 2. Sync Status Block */}
+          <div className="space-y-3">
             {pendingSyncCount > 0 ? (
-              <div className="bg-amber-500/10 border border-amber-500/30 rounded-2xl p-4 animate-in fade-in zoom-in duration-500">
-                <div className="flex items-center gap-3 mb-3">
-                  <div className="size-3 bg-amber-500 rounded-full animate-pulse shadow-[0_0_10px_rgba(245,158,11,0.6)]" />
-                  <span className="text-[0.7rem] font-black text-amber-500 uppercase tracking-widest">
-                    {pendingSyncCount} Action(s) en attente
-                  </span>
+              <div className="bg-amber-500/5 border border-amber-500/20 rounded-[2rem] p-5 animate-in fade-in zoom-in duration-500">
+                <div className="flex items-center gap-3 mb-4">
+                  <div className="size-2.5 bg-amber-500 rounded-full animate-pulse shadow-[0_0_12px_rgba(245,158,11,0.5)]" />
+                  <div className="flex flex-col">
+                    <span className="text-[0.65rem] font-black text-amber-500 uppercase tracking-widest leading-tight">Sync</span>
+                    <span className="text-[0.55rem] font-bold text-amber-500/60 uppercase tracking-[0.15em]">
+                      {pendingSyncCount} action{pendingSyncCount > 1 ? 's' : ''} en attente
+                    </span>
+                  </div>
                 </div>
                 
                 <button
                   onClick={handleManualSync}
                   disabled={isSyncing || !isOnline}
-                  className={`w-full py-2.5 rounded-xl flex items-center justify-center gap-2 text-[0.65rem] font-black uppercase tracking-widest transition-all ${
+                  className={`w-full py-3 rounded-2xl flex items-center justify-center gap-2 text-[0.6rem] font-black uppercase tracking-[0.2em] transition-all ${
                     isOnline 
                       ? 'bg-amber-500 text-white hover:bg-amber-400 shadow-lg shadow-amber-500/20 active:scale-95' 
                       : 'bg-slate-800 text-slate-500 cursor-not-allowed opacity-50'
                   }`}
                 >
-                  {isSyncing ? (
-                    <Loader2 size={14} className="animate-spin" />
-                  ) : (
-                    <RefreshCw size={14} />
-                  )}
-                  {isSyncing ? 'Synchronisation...' : 'Forcer la Synchro'}
+                  {isSyncing ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
+                  {isSyncing ? 'Synchronisation...' : 'Synchroniser'}
                 </button>
               </div>
             ) : (
-              <div className="flex items-center gap-3 px-4 py-3 bg-emerald-500/5 border border-emerald-500/10 rounded-2xl transition-all duration-500">
-                <div className="size-2 bg-emerald-500 rounded-full shadow-[0_0_8px_rgba(16,185,129,0.3)]" />
-                <span className="text-[0.65rem] font-black text-emerald-500/80 uppercase tracking-widest">
-                  Données Synchronisées
-                </span>
+              <div className="px-5 py-4 rounded-[2rem] border bg-[#0d1a1a] border-emerald-500/20 flex items-center gap-4 transition-all duration-700">
+                <div className="size-2.5 bg-emerald-500 rounded-full shadow-[0_0_10px_rgba(16,185,129,0.4)] shrink-0" />
+                <div className="flex flex-col">
+                  <span className="text-[0.65rem] font-black text-emerald-500 uppercase tracking-[0.2em] leading-tight">Données</span>
+                  <span className="text-[0.65rem] font-black text-emerald-500 uppercase tracking-[0.2em] leading-tight">Synchronisées</span>
+                </div>
               </div>
             )}
           </div>

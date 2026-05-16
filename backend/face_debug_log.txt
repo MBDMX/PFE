@@ -21,3 +21,27 @@
 [FACE TOKEN] OK — issuing tokens for resp1
 [DESCRIPTORS] Served 2 profile(s)
 [DESCRIPTORS] Served 2 profile(s)
+[DESCRIPTORS] Served 2 profile(s)
+[DESCRIPTORS] Served 2 profile(s)
+[DESCRIPTORS] Served 2 profile(s)
+[FACE TOKEN] Re-verify resp1: dist=0.6669
+[FACE TOKEN] OK — issuing tokens for resp1
+[DESCRIPTORS] Served 2 profile(s)
+[DESCRIPTORS] Served 2 profile(s)
+[DESCRIPTORS] Served 2 profile(s)
+[ENROLL-MULTI] 15 samples saved for user resp1
+[DESCRIPTORS] Served 2 profile(s)
+[DESCRIPTORS] Served 2 profile(s)
+[DESCRIPTORS] Served 2 profile(s)
+[FACE TOKEN] Re-verify resp1: dist=0.1792
+[FACE TOKEN] OK — issuing tokens for resp1
+[ENROLL-MULTI] 15 samples saved for user tech_meca
+[DESCRIPTORS] Served 3 profile(s)
+[DESCRIPTORS] Served 3 profile(s)
+[FACE TOKEN] Re-verify tech_meca: dist=0.3047
+[FACE TOKEN] OK — issuing tokens for tech_meca
+[DESCRIPTORS] Served 3 profile(s)
+[DESCRIPTORS] Served 3 profile(s)
+[DESCRIPTORS] Served 3 profile(s)
+[DESCRIPTORS] Served 3 profile(s)
+[DESCRIPTORS] Served 3 profile(s)

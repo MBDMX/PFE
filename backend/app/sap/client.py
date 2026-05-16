@@ -43,8 +43,12 @@ class SAPClient:
             cls._instance = super().__new__(cls)
             # Service Layer session
             cls._sl_session = requests.Session()
-            cls._sl_session.mount('https://', TLSAdapter())
+            # On simplifie pour éviter les blocages TLSAdapter sur certains environnements
             cls._sl_session.verify = False
+            cls._sl_session.headers.update({
+                "Content-Type": "application/json",
+                "Accept": "application/json"
+            })
             # ProcessForce / AppEngine session
             cls._pf_session = requests.Session()
             cls._pf_session.mount('https://', TLSAdapter())
@@ -60,24 +64,32 @@ class SAPClient:
     # env: SAP_SL_URL, SAP_COMPANY_DB, SAP_USERNAME, SAP_PASSWORD
     # =========================================================
     def login_sl(self) -> bool:
+        load_dotenv(override=True)
+        self.sl_url = os.getenv("SAP_SL_URL")
         if not self.sl_url:
             print("[SL] Error: SAP_SL_URL is not set.")
             return False
-        url = f"{self.sl_url}/Login"
+            
+        base_url = self.sl_url.rstrip('/')
+        url = f"{base_url}/Login"
+        
         payload = {
             "CompanyDB": os.getenv("SAP_COMPANY_DB"),
             "UserName":  os.getenv("SAP_USERNAME"),
             "Password":  os.getenv("SAP_PASSWORD"),
         }
+        
+        print(f"[SL] Tentative de connexion sur : {url}")
         try:
-            resp = self._sl_session.post(url, json=payload, timeout=15)
+            resp = self._sl_session.post(url, json=payload, timeout=10, verify=False)
             if resp.status_code == 200:
-                print(f"[SL] Login OK (CompanyDB={payload['CompanyDB']})")
+                print(f"[SL] ✅ Login OK pour {payload['CompanyDB']}")
                 return True
-            print(f"[SL] Login failed {resp.status_code}: {resp.text[:200]}")
+            
+            print(f"[SL] ❌ Login Échoué ({resp.status_code}): {resp.text}")
             return False
         except Exception as e:
-            print(f"[SL] Connection error: {e}")
+            print(f"[SL] 🚨 Erreur de connexion au serveur : {e}")
             return False
 
     def _sl_get(self, endpoint: str):
@@ -96,8 +108,11 @@ class SAPClient:
             print(f"[SL] GET {endpoint} error: {e}")
             return []
 
-    def get_items(self, top: int = 50):
-        return self._sl_get(f"/Items?$top={top}")
+    def get_items(self, top: int = 100):
+        """Récupère les articles avec leurs prix et stocks."""
+        # On demande explicitement les champs nécessaires pour le dashboard
+        query = "/Items?$select=ItemCode,ItemName,QuantityOnStock,ItemPrices,InventoryUOM&$top=" + str(top)
+        return self._sl_get(query)
 
     def get_business_partners(self, top: int = 50):
         return self._sl_get(f"/BusinessPartners?$top={top}")
@@ -106,34 +121,60 @@ class SAPClient:
         return self._sl_get("/Users?$select=UserCode,UserName,eMail,Department")
 
     def create_purchase_request(self, item_code: str, quantity: float, remarks: str = "", user_name: str = "GMAO User", supplier_info: str = "") -> dict:
-        """Crée une Demande d'Achat (Purchase Request) dans SAP B1 avec traçabilité."""
+        """Crée une Demande d'Achat (Purchase Request) dans SAP B1 - Standard V1 avec Fix Date."""
         url = f"{self.sl_url}/PurchaseRequests"
         
-        # Construction de la remarque détaillée pour la traçabilité
-        detailed_remarks = f"Demandé par : {user_name}\n"
-        if supplier_info:
-            detailed_remarks += f"Fournisseur suggéré : {supplier_info}\n"
-        detailed_remarks += f"Motif : {remarks or 'Besoin maintenance GMAO'}"
-
+        from datetime import timedelta
+        now = datetime.now()
+        today = now.strftime("%Y-%m-%d")
+        
         payload = {
-            "DocDueDate": datetime.now().strftime("%Y-%m-%d"), 
-            "ReqType": "12",
-            "Remarks": detailed_remarks,
+            "DocDate": today,
+            "DocDueDate": today,
+            "TaxDate": today,
+            "RequriedDate": today, # Typo doc
+            "ReqDate": today,      # Standard en-tête
+            "RequiredDate": today, # En-tête alternatif
+            "U_ReqDate": today,    # UDF possible (vu dans ta doc ProcessForce)
+            "U_RequiredDate": today, # UDF possible
+            "ReqType": 171,
+            "RequesterCode": "1",
+            "Remarks": f"Demandé par : {user_name}\nMotif : {remarks or 'GMAO'}",
             "PurchaseRequestLines": [
                 {
-                    "ItemCode": item_code,
+                    "ItemCode": item_code.strip(),
                     "Quantity": quantity,
+                    "ReqDate": today,
+                    "RequiredDate": today
+                }
+            ],
+            "DocumentLines": [
+                {
+                    "ItemCode": item_code.strip(),
+                    "Quantity": quantity,
+                    "ReqDate": today,
+                    "RequiredDate": today
                 }
             ]
         }
+        print(f"[DEBUG SAP PR UDF TEST] Payload: {json.dumps(payload, indent=2)}")
+        
+        # On tente sans le header OData spécifique d'abord
+        h = {}
         try:
-            resp = self._sl_session.post(url, json=payload, timeout=15)
+            # DEBUG: On regarde cet article spécifique
+            specific_item = self._sl_session.get(f"{self.sl_url}/Items('EX0201PRE0101')", timeout=10)
+            print(f"[DEBUG SAP ITEM] {specific_item.text}")
+
+            resp = self._sl_session.post(url, json=payload, headers=h, timeout=15)
             if resp.status_code == 401 and self.login_sl():
-                resp = self._sl_session.post(url, json=payload, timeout=15)
+                resp = self._sl_session.post(url, json=payload, headers=h, timeout=15)
             
             if resp.status_code in (200, 201):
                 return resp.json()
-            print(f"[SL] PR Error {resp.status_code}: {resp.text[:200]}")
+            
+            # Detailed logging for PFE troubleshooting
+            print(f"[SL] PR Error {resp.status_code}: {resp.text[:500]}")
             return {}
         except Exception as e:
             print(f"[SL] PR Exception: {e}")
@@ -155,13 +196,15 @@ class SAPClient:
             ]
         }
         try:
-            resp = self._sl_session.post(url, json=payload, timeout=15)
+            h = {"OData-MaxVersion": "4.0", "OData-Version": "4.0"}
+            resp = self._sl_session.post(url, json=payload, headers=h, timeout=15)
             if resp.status_code == 401 and self.login_sl():
-                resp = self._sl_session.post(url, json=payload, timeout=15)
+                resp = self._sl_session.post(url, json=payload, headers=h, timeout=15)
             
             if resp.status_code in (200, 201):
                 return resp.json()
-            print(f"[SL] Transfer Error {resp.status_code}: {resp.text[:200]}")
+            
+            print(f"[SL] Transfer Error {resp.status_code}: {resp.text[:500]}")
             return {}
         except Exception as e:
             print(f"[SL] Transfer Exception: {e}")
@@ -347,12 +390,46 @@ class SAPClient:
         }
         return self._pf_patch(f"/odata/ProcessForce/MaintenanceOrder({doc_entry})", payload)
 
+    def add_part_to_maintenance_order(self, doc_entry: str, item_code: str, quantity: float, warehouse: str = "01") -> bool:
+        """
+        App -> SAP: Ajoute une pièce de rechange consommée à un OT SAP existant.
+        Cela permet de tracer 'où' la pièce a été prise (WarehouseCode).
+        """
+        if not doc_entry or not item_code:
+            return False
+            
+        print(f"[SAP SYNC] Ajout pièce {item_code} (Qté: {quantity}) à l'OT SAP #{doc_entry} (Magasin: {warehouse})")
+        
+        # Dans ProcessForce, les pièces sont des lignes liées à l'OT
+        # On utilise généralement l'endpoint MaintenanceOrderLine ou l'expand sur MaintenanceOrder
+        # Ici on tente l'ajout via l'endpoint dédié des lignes
+        payload = {
+            "DocEntry": int(doc_entry),
+            "ItemCode": item_code,
+            "Quantity": quantity,
+            "WarehouseCode": warehouse,
+            "U_MOId": int(doc_entry) # Lien explicite vers l'OT
+        }
+        
+        # Note: Dans certaines versions de PF, on doit passer par MaintenanceOrder(id)/MaintenanceOrderLines
+        # On utilise POST /MaintenanceOrderLine pour créer la ligne de consommation
+        res = self._pf_post("/odata/ProcessForce/MaintenanceOrderLine", payload)
+        return bool(res and res.get("DocEntry"))
+
     # =========================================================
     # STATUS
     # =========================================================
     def get_connection_status(self) -> dict:
-        sl_ok = self.login_sl()
-        pf_ok = self.login_pf()
+        try:
+            sl_ok = self.login_sl()
+        except:
+            sl_ok = False
+            
+        try:
+            pf_ok = self.login_pf()
+        except:
+            pf_ok = False
+            
         return {
             "service_layer": {
                 "status":     "connected" if sl_ok else "disconnected",
