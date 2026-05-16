@@ -165,7 +165,6 @@ export default function Traceability() {
                     Exporter CSV
                 </button>
             </div>
-            </div>
 
 
             {/* ── Table ───────────────────────────────────────────────────── */}

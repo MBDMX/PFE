@@ -17,6 +17,8 @@ model User {
   name            String?
   manager_id      Int?
   team            String?
+  is_active       Boolean        @default(true)
+  permissions     String         @default("{}")
   
   face_descriptor String?
   

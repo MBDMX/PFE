@@ -1,6 +1,6 @@
 import { 
   Package, MapPin, ShoppingCart, ArrowUpDown, ArrowRightLeft,
-  CheckCircle2, AlertCircle, Wrench, 
+  CheckCircle2, AlertCircle, Settings2, Wrench, 
   Zap, Droplets, Cpu, Box 
 } from 'lucide-react';
 import { StockItem } from './types';
@@ -114,6 +114,7 @@ function TableSkeleton({ canOrder }: { canOrder: boolean }) {
 }
 
 export default function InventoryTable({ items, isLoading, canOrder, onOrder, onTransfer, sortConfig, onSort }: Props) {
+
   const SortHeader = ({ label, sortKey }: { label: string; sortKey: string }) => (
     <th onClick={() => onSort?.(sortKey)} className="cursor-pointer hover:text-blue-400 transition-colors group">
       <div className="flex items-center gap-2">

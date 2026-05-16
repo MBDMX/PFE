@@ -1,6 +1,7 @@
 'use client';
 import React, { useEffect, useState } from 'react';
 import { Brain, Activity, AlertTriangle, ChevronRight, Zap } from 'lucide-react';
+import { useRouter } from 'next/navigation';
 import api from '../../../../services/api';
 
 interface MLMachineHealth {
@@ -18,6 +19,7 @@ interface MLSummary {
 }
 
 export default function MLHealthWidget() {
+    const router = useRouter();
     const [data, setData] = useState<MLMachineHealth[]>([]);
     const [summary, setSummary] = useState<MLSummary | null>(null);
     const [loading, setLoading] = useState(true);
@@ -81,7 +83,11 @@ export default function MLHealthWidget() {
                 <div className="text-[0.6rem] font-black text-slate-600 uppercase tracking-[0.2em] mb-4">Équipements les plus instables</div>
                 
                 {data.sort((a,b) => a.score - b.score).map((m) => (
-                    <div key={m.id} className="p-3 rounded-xl bg-white/5 border border-white/5 hover:bg-white/10 hover:border-blue-500/20 transition-all cursor-pointer group/item">
+                    <div 
+                        key={m.id} 
+                        onClick={() => router.push(`/machines/${m.id}`)}
+                        className="p-3 rounded-xl bg-white/5 border border-white/5 hover:bg-white/10 hover:border-blue-500/20 transition-all cursor-pointer group/item"
+                    >
                         <div className="flex items-center justify-between mb-2">
                             <div className="flex items-center gap-3">
                                 <div className={`size-2 rounded-full shadow-[0_0_8px] ${m.risk === 'High' ? 'bg-rose-500 shadow-rose-500/40' : (m.risk === 'Medium' ? 'bg-amber-500 shadow-amber-400/40' : 'bg-emerald-500 shadow-emerald-500/40')}`} />
@@ -121,7 +127,10 @@ export default function MLHealthWidget() {
                 )}
             </div>
 
-            <button className="mt-6 w-full py-3 rounded-xl bg-blue-600/10 hover:bg-blue-600/20 border border-blue-500/20 text-blue-400 font-black uppercase text-[0.65rem] tracking-[0.2em] transition-all flex items-center justify-center gap-2 group/btn">
+            <button 
+                onClick={() => router.push('/machines')}
+                className="mt-6 w-full py-3 rounded-xl bg-blue-600/10 hover:bg-blue-600/20 border border-blue-500/20 text-blue-400 font-black uppercase text-[0.65rem] tracking-[0.2em] transition-all flex items-center justify-center gap-2 group/btn"
+            >
                 <span>Détails Analytiques</span>
                 <ChevronRight size={14} className="group-hover/btn:translate-x-1 transition-transform" />
             </button>

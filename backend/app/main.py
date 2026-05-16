@@ -3,7 +3,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 import os
 
-from app.api import auth as auth_api, machines as machines_api, work_orders as wo_api, stock as stock_api, stats as stats_api, system as system_api, users as users_api, magasinier as mag_api, sap as sap_api, face_auth as face_api, predictive as pred_api
+import asyncio
+from app.api import auth, machines, work_orders, stock, stats, system, users, magasinier, sap, face_auth, predictive
 from app.db.session import prisma
 from app.core.websocket import manager
 
@@ -27,6 +28,7 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 @app.middleware("http")
 async def redirect_old_images(request: Request, call_next):
     if request.url.path.startswith("/static/parts/") and not "/part_" in request.url.path:
+        # Extrait l'ID de "1.jpg"
         filename = request.url.path.split("/")[-1]
         if filename.endswith(".jpg") and filename[:-4].isdigit():
             new_path = f"/static/parts/part_{filename}"
@@ -34,36 +36,12 @@ async def redirect_old_images(request: Request, call_next):
             return RedirectResponse(url=new_path)
     return await call_next(request)
 
-
 @app.on_event("startup")
 async def startup():
-    # Toutes les tâches de fond lourdes sont désactivées pour stabiliser le serveur
-    # Cela évite que le processus ne soit tué par Windows ou ne bloque le handshake WS
-    pass
-
-async def _ml_retraining_loop():
-    """
-    Background Task : Réentraîne le modèle ML toutes les 24h.
-    Garantit que le modèle s'adapte à l'historique croissant des OT.
-    Pattern Pipeline Automatisé (défendable en PFE).
-    """
+    await prisma.connect()
+    # ✅ On lance la réparation en arrière-plan pour ne pas bloquer le démarrage du serveur
     import asyncio
-    from app.core.ml_service import ml_service
-    # Premier entraînement au démarrage (après 5s pour laisser le serveur s'initialiser)
-    await asyncio.sleep(5)
-    try:
-        await ml_service.predict_health_scores(prisma)
-        print(f"✅ [ML] Modèle entraîné au démarrage. Silhouette Score: {ml_service.silhouette}")
-    except Exception as e:
-        print(f"⚠️  [ML] Erreur entraînement initial: {e}")
-    # Réentraînement toutes les 24h
-    while True:
-        await asyncio.sleep(86400)
-        try:
-            await ml_service.predict_health_scores(prisma)
-            print(f"🔄 [ML] Réentraînement automatique. Silhouette Score: {ml_service.silhouette}")
-        except Exception as e:
-            print(f"⚠️  [ML] Erreur réentraînement: {e}")
+    asyncio.create_task(_auto_fix_images())
 
 async def _auto_fix_images():
     """
@@ -119,18 +97,18 @@ async def websocket_endpoint(websocket: WebSocket):
         manager.disconnect(websocket)
 
 # Include Modular Routers
-app.include_router(auth_api.router, prefix="/api/auth", tags=["auth"])
-app.include_router(system_api.router, prefix="/api")
-app.include_router(machines_api.router, prefix="/api")
-app.include_router(wo_api.router, prefix="/api")
-app.include_router(stock_api.router, prefix="/api/stock")
-app.include_router(stock_api.pr_router, prefix="/api")
-app.include_router(stats_api.router, prefix="/api")
-app.include_router(users_api.router, prefix="/api")
-app.include_router(mag_api.router, prefix="/api")
-app.include_router(sap_api.router, prefix="/api")
-app.include_router(face_api.router, prefix="/api", tags=["face-auth"])
-app.include_router(pred_api.router, prefix="/api")
+app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
+app.include_router(system.router, prefix="/api")
+app.include_router(machines.router, prefix="/api")
+app.include_router(work_orders.router, prefix="/api")
+app.include_router(stock.router, prefix="/api/stock")
+app.include_router(stock.pr_router, prefix="/api")
+app.include_router(stats.router, prefix="/api")
+app.include_router(users.router, prefix="/api")
+app.include_router(magasinier.router, prefix="/api")
+app.include_router(sap.router, prefix="/api")
+app.include_router(face_auth.router, prefix="/api", tags=["face-auth"])
+app.include_router(predictive.router, prefix="/api")
 
 if __name__ == "__main__":
     import uvicorn

@@ -421,6 +421,7 @@ export const gmaoApi = {
     getMachineFinancials: (machineId: number) => 
         handleGet(`/machines/${machineId}/financials`),
 
+
     getReliabilityKpis: () => handleGet('/kpi-reliability'),
     getTechnicians: () => handleGet('/technicians', db.technicians),
     _isSyncingInternal: false,

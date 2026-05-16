@@ -1,6 +1,7 @@
 'use client';
 import { useEffect, useState } from 'react';
 import { Activity, Clock, Zap, BarChart2, AlertTriangle } from 'lucide-react';
+import { useRouter } from 'next/navigation';
 import { gmaoApi } from '../../../../services/api';
 
 interface MachineBreakdown {
@@ -15,10 +16,11 @@ interface ReliabilityData {
     reliability_pct: number | null;
     total_corrective_ots: number;
     closed_corrective_ots: number;
-    machine_breakdown: MachineBreakdown[];
+    machine_breakdown?: MachineBreakdown[];
 }
 
 export default function ReliabilityWidget() {
+    const router = useRouter();
     const [data, setData] = useState<ReliabilityData | null>(null);
     const [loading, setLoading] = useState(true);
 
@@ -119,8 +121,12 @@ export default function ReliabilityWidget() {
                         {(data.machine_breakdown ?? []).slice(0, 5).map((m) => {
                             const barPct = Math.min((m.failure_count / ((data.machine_breakdown ?? [])[0]?.failure_count || 1)) * 100, 100);
                             return (
-                                <div key={m.equipment_id} className="flex items-center gap-3">
-                                    <div className="text-[0.6rem] font-black text-slate-400 uppercase w-20 truncate shrink-0">
+                                <div 
+                                    key={m.equipment_id} 
+                                    onClick={() => router.push(`/machines`)} // On navigue vers la liste car equipment_id peut être une ref
+                                    className="flex items-center gap-3 cursor-pointer group/item hover:bg-white/5 p-1 rounded-lg transition-all"
+                                >
+                                    <div className="text-[0.6rem] font-black text-slate-400 uppercase w-20 truncate shrink-0 group-hover/item:text-blue-400">
                                         {m.equipment_id}
                                     </div>
                                     <div className="flex-1 h-1.5 bg-white/5 rounded-full overflow-hidden">

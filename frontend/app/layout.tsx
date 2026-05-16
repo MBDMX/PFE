@@ -6,7 +6,8 @@ import { usePathname, useRouter } from 'next/navigation';
 import {
   LayoutDashboard, Wrench, ClipboardList,
   Package, LogOut, ShieldCheck, Settings, ChevronRight, Users, Warehouse,
-  RefreshCw, Clock, Square, AlertTriangle, Loader2, Bell, Activity, CheckCircle
+  RefreshCw, Clock, Square, AlertTriangle, Loader2, Bell, Activity, CheckCircle,
+  Trash2, AlertCircle, Wifi, WifiOff
 } from 'lucide-react';
 import { useEffect, useState, useRef } from 'react';
 import { gmaoApi } from '../services/api';
@@ -176,6 +177,21 @@ function GlobalTimerBar() {
 // ────────────────────────────────────────────
 // Client Content Wrapper (Uses Contexts)
 // ────────────────────────────────────────────
+const ACTION_NAMES: Record<string, string> = {
+    CREATE_WORK_ORDER: 'Création OT',
+    UPDATE_WORK_ORDER: 'Mise à jour OT',
+    DELETE_WORK_ORDER: 'Suppression OT',
+    ADD_PART: 'Ajout de pièce',
+    CREATE_PARTS_REQUEST: 'Demande de pièces',
+    CREATE_STOCK_MOVEMENT: 'Mouvement Stock',
+    TIMER_START: 'Démarrage Chrono',
+    TIMER_STOP: 'Arrêt Chrono',
+    APPROVE_DELETION: 'Approbation Suppr.',
+    REJECT_DELETION: 'Rejet Suppression',
+    SYNC_SAP_MACHINES: 'Sync SAP Machines',
+    SYNC_SAP_OTS: 'Sync SAP OT'
+};
+
 function ClientAppWrapper({ children }: { children: React.ReactNode }) {
   const path = usePathname();
   const router = useRouter();
@@ -184,8 +200,9 @@ function ClientAppWrapper({ children }: { children: React.ReactNode }) {
   const [pendingSyncCount, setPendingSyncCount] = useState(0);
   const [syncStatus, setSyncStatus] = useState({ pending: 0, errors: 0, total: 0 });
   const [isSyncing, setIsSyncing] = useState(false);
+  const [syncActions, setSyncActions] = useState<any[]>([]);
   const [notifCount, setNotifCount] = useState(0);
-  const { success, error: toastError, error } = useToast();
+  const { success, warning, error: toastError, error } = useToast();
 
   const isLogin = path === '/login' || path === '/';
 
@@ -204,10 +221,9 @@ function ClientAppWrapper({ children }: { children: React.ReactNode }) {
         clearTimeout(timer);
         setIsOnline(prev => {
           if (!prev) {
-            console.log("🚀 Connection restored! Triggering sync...");
-            gmaoApi.syncData().then(() => {
-              success("Synchronisation réussie", "Vos actions hors-ligne ont été envoyées.");
-            }).catch(() => {});
+            console.log("🚀 Connection restored! Manual sync required.");
+            // We disable auto-sync to let the user see the count as requested
+            // gmaoApi.syncData().then(() => { ... }).catch(() => {});
           }
           return true;
         });
@@ -252,18 +268,6 @@ function ClientAppWrapper({ children }: { children: React.ReactNode }) {
     }
 
     if (navigator.onLine) {
-      // 🧹 Purge stale/phantom items from previous sessions
-      db.syncQueue.toArray().then(all => {
-        const stale = all.filter(a => a.status === 'error' || a.status === 'syncing');
-        if (stale.length > 0) {
-          db.syncQueue.bulkDelete(stale.map(a => a.id!));
-          console.log(`🧹 Purged ${stale.length} stale sync queue item(s).`);
-        }
-      });
-
-      // Initial Master Data Sync
-      gmaoApi.syncData().catch(() => { });
-
       // Fetch initial notification count
       const token = localStorage.getItem('token');
       if (token) {
@@ -291,6 +295,7 @@ function ClientAppWrapper({ children }: { children: React.ReactNode }) {
         
         setPendingSyncCount(total);
         setSyncStatus({ pending, errors, total });
+        setSyncActions(all);
       } catch (err) {
         console.error("Dexie Poll Error:", err);
       }
@@ -317,7 +322,7 @@ function ClientAppWrapper({ children }: { children: React.ReactNode }) {
       await gmaoApi.syncData();
       success('Synchronisation Terminée', 'Les actions en attente ont été traitées.');
     } catch (err) {
-      toastError('Erreur de Sync', 'Certaines actions n\'ont pas pu être synchronisées.');
+      toastError('Conflit détecté', 'Certaines actions (ex: stock insuffisant) n\'ont pas pu être synchronisées. Vérifiez les détails dans le menu de connectivité en bas à gauche.');
     } finally {
       setIsSyncing(false);
     }
@@ -442,6 +447,21 @@ function ClientAppWrapper({ children }: { children: React.ReactNode }) {
     setUser(getUserFromToken());
   }, [path]);
 
+  // 3. Security: Force redirect to correct dashboard if path mismatch
+  useEffect(() => {
+    const u = getUserFromToken(); // Get fresh user for redirect check
+    if (isLogin || !u?.role) return;
+
+    const currentPath = path;
+    const correctRoute = ROLE_ROUTES[u.role];
+
+    // If user is inside /dashboard but on the wrong role subpath
+    if (currentPath.startsWith('/dashboard') && !currentPath.startsWith(correctRoute)) {
+      console.warn(`🔒 Security: Redirecting ${u.role} from ${currentPath} to ${correctRoute}`);
+      router.replace(correctRoute);
+    }
+  }, [path]);
+
   function getDashHref() {
     return user?.role ? (ROLE_ROUTES[user.role] ?? '/dashboard/technician') : '/dashboard/technician';
   }
@@ -449,6 +469,7 @@ function ClientAppWrapper({ children }: { children: React.ReactNode }) {
   function handleLogout() {
     localStorage.removeItem('token');
     localStorage.removeItem('refresh_token');
+    localStorage.removeItem('user');
     router.push('/login');
   }
 
@@ -480,123 +501,227 @@ function ClientAppWrapper({ children }: { children: React.ReactNode }) {
             Navigation
           </div>
 
-          {(user?.role === 'magasinier' || user?.role === 'admin') && (
-            <Link href="/dashboard/magasinier" className={`sidebar-link ${path.startsWith('/dashboard/magasinier') ? 'active' : ''}`}>
-              <Warehouse size={20} />
-              <span>Dashboard</span>
-              {path.startsWith('/dashboard/magasinier') && <ChevronRight size={14} className="ml-auto text-blue-400" />}
-            </Link>
-          )}
-
-          {user?.role !== 'magasinier' && (
+          {/* ── Admin-specific nav ── */}
+          {user?.role === 'admin' && (
             <>
-              <Link id="nav-dashboard" href={getDashHref()} className={`sidebar-link ${path.startsWith('/dashboard') && !path.startsWith('/dashboard/magasinier') ? 'active' : ''}`}>
-                <LayoutDashboard size={20} />
-                <span>Dashboard</span>
-                {path.startsWith('/dashboard') && !path.startsWith('/dashboard/magasinier') && <ChevronRight size={14} className="ml-auto text-blue-400" />}
-              </Link>
-
-              <Link id="nav-machines" href="/machines" className={`sidebar-link ${path === '/machines' ? 'active' : ''}`}>
-                <Wrench size={20} />
-                <span>Parc Machines</span>
-                {path === '/machines' && <ChevronRight size={14} className="ml-auto text-blue-400" />}
-              </Link>
-
-              <Link id="nav-work-orders" href="/work-orders" className={`sidebar-link ${path.startsWith('/work-orders') ? 'active' : ''}`}>
-                <ClipboardList size={20} />
-                <span>Ordre de travail</span>
-                {path.startsWith('/work-orders') && <ChevronRight size={14} className="ml-auto text-blue-400" />}
-              </Link>
+              {[
+                { tab: 'overview',       label: 'Home',             Icon: LayoutDashboard },
+                { tab: 'users',          label: 'Utilisateurs',     Icon: Users },
+                { tab: 'settings',       label: 'Paramètres',       Icon: Settings },
+              ].map(({ tab, label, Icon, badge }: { tab: string; label: string; Icon: any; badge?: number }) => {
+                const href = `/dashboard/admin?tab=${tab}`;
+                const isActive = path.startsWith('/dashboard/admin') && (path.includes(`tab=${tab}`) || (tab === 'overview' && !path.includes('tab=')));
+                return (
+                  <Link key={tab} href={href} className={`sidebar-link ${isActive ? 'active' : ''} relative`}>
+                    <Icon size={20} />
+                    <span>{label}</span>
+                    {badge && badge > 0 ? (
+                      <span className="ml-auto flex items-center justify-center min-w-[20px] h-5 px-1.5 rounded-full bg-red-500 text-[0.6rem] font-black text-white shadow-lg shadow-red-500/40 animate-pulse">
+                        {badge > 99 ? '99+' : badge}
+                      </span>
+                    ) : isActive ? (
+                      <ChevronRight size={14} className="ml-auto text-blue-400" />
+                    ) : null}
+                  </Link>
+                );
+              })}
             </>
           )}
 
-          <Link id="nav-stock" href="/stock" className={`sidebar-link ${path === '/stock' ? 'active' : ''}`}>
-            <Package size={20} />
-            <span>Stock Pièces</span>
-            {path === '/stock' && <ChevronRight size={14} className="ml-auto text-blue-400" />}
-          </Link>
-
-          {(user?.role === 'manager' || user?.role === 'admin') && (
+          {/* ── Non-admin nav ── */}
+          {user?.role !== 'admin' && (
             <>
-              <Link href="/dashboard/manager/equipe" className={`sidebar-link ${path.startsWith('/dashboard/manager/equipe') ? 'active' : ''}`}>
-                <Users size={20} />
-                <span>Supervision Équipe</span>
-                {path.startsWith('/dashboard/manager/equipe') && <ChevronRight size={14} className="ml-auto text-blue-400" />}
-              </Link>
-            </>
-          )}
-          {(user?.role === 'magasinier' || user?.role === 'admin') && (
-            <Link href="/dashboard/magasinier" className={`sidebar-link ${path.startsWith('/dashboard/magasinier') ? 'active' : ''} relative`}>
-              <Warehouse size={20} />
-              <span>Bon de Sortie</span>
-              {notifCount > 0 && (
-                <span className="ml-auto flex items-center justify-center min-w-[20px] h-5 px-1.5 rounded-full bg-amber-500 text-[0.6rem] font-black text-white shadow-lg shadow-amber-500/40 animate-pulse">
-                  {notifCount > 99 ? '99+' : notifCount}
-                </span>
+              {user?.role === 'magasinier' && (
+                <Link href="/dashboard/magasinier" className={`sidebar-link ${path.startsWith('/dashboard/magasinier') ? 'active' : ''}`}>
+                  <Warehouse size={20} />
+                  <span>Dashboard</span>
+                  {path.startsWith('/dashboard/magasinier') && <ChevronRight size={14} className="ml-auto text-blue-400" />}
+                </Link>
               )}
-              {notifCount === 0 && path.startsWith('/dashboard/magasinier') && <ChevronRight size={14} className="ml-auto text-blue-400" />}
-            </Link>
+
+              {user?.role !== 'magasinier' && (
+                <>
+                  <Link href={getDashHref()} className={`sidebar-link ${path.startsWith('/dashboard') && !path.startsWith('/dashboard/magasinier') ? 'active' : ''}`}>
+                    <LayoutDashboard size={20} />
+                    <span>Dashboard</span>
+                    {path.startsWith('/dashboard') && !path.startsWith('/dashboard/magasinier') && <ChevronRight size={14} className="ml-auto text-blue-400" />}
+                  </Link>
+
+                  <Link href="/machines" className={`sidebar-link ${path === '/machines' ? 'active' : ''}`}>
+                    <Wrench size={20} />
+                    <span>Parc Machines</span>
+                    {path === '/machines' && <ChevronRight size={14} className="ml-auto text-blue-400" />}
+                  </Link>
+
+                  <Link href="/work-orders" className={`sidebar-link ${path.startsWith('/work-orders') ? 'active' : ''}`}>
+                    <ClipboardList size={20} />
+                    <span>Ordre de travail</span>
+                    {path.startsWith('/work-orders') && <ChevronRight size={14} className="ml-auto text-blue-400" />}
+                  </Link>
+                </>
+              )}
+
+              <Link href="/stock" className={`sidebar-link ${path === '/stock' ? 'active' : ''}`}>
+                <Package size={20} />
+                <span>Stock Pièces</span>
+                {path === '/stock' && <ChevronRight size={14} className="ml-auto text-blue-400" />}
+              </Link>
+
+              {user?.role === 'manager' && (
+                <Link href="/dashboard/manager/equipe" className={`sidebar-link ${path.startsWith('/dashboard/manager/equipe') ? 'active' : ''}`}>
+                  <Users size={20} />
+                  <span>Supervision Équipe</span>
+                  {path.startsWith('/dashboard/manager/equipe') && <ChevronRight size={14} className="ml-auto text-blue-400" />}
+                </Link>
+              )}
+
+              {user?.role === 'magasinier' && (
+                <Link href="/dashboard/magasinier" className={`sidebar-link ${path.startsWith('/dashboard/magasinier') ? 'active' : ''} relative`}>
+                  <Warehouse size={20} />
+                  <span>Bon de Sortie</span>
+                  {notifCount > 0 && (
+                    <span className="ml-auto flex items-center justify-center min-w-[20px] h-5 px-1.5 rounded-full bg-amber-500 text-[0.6rem] font-black text-white shadow-lg shadow-amber-500/40 animate-pulse">
+                      {notifCount > 99 ? '99+' : notifCount}
+                    </span>
+                  )}
+                  {notifCount === 0 && path.startsWith('/dashboard/magasinier') && <ChevronRight size={14} className="ml-auto text-blue-400" />}
+                </Link>
+              )}
+            </>
           )}
         </nav>
 
-        {/* ── Network & Sync Indicator (Version Binôme) ── */}
-        <div className="mt-auto px-3 pb-8 space-y-4 pt-6 border-t border-white/5">
-          
-          {/* 1. Network Status Pill */}
-          <div className={`px-5 py-3 rounded-full border transition-all duration-700 flex items-center gap-4 ${
-            isOnline 
-              ? 'bg-[#0d1a1a] border-emerald-500/20 text-emerald-500 shadow-[0_0_15px_rgba(16,185,129,0.05)]' 
-              : 'bg-[#1a101a] border-rose-500/30 text-rose-500 shadow-[0_0_20px_rgba(244,63,94,0.1)]'
-          }`}>
-            <div className={`size-2.5 rounded-full shrink-0 ${
-              isOnline 
-                ? 'bg-emerald-500 shadow-[0_0_12px_rgba(16,185,129,0.6)]' 
-                : 'bg-rose-500 animate-pulse shadow-[0_0_12px_rgba(244,63,94,0.6)]'
-            }`} />
-            <div className="flex items-center gap-2">
-              {!isOnline && <AlertTriangle size={14} className="text-yellow-400" />}
-              <span className="text-[0.7rem] font-black uppercase tracking-[0.2em] leading-none">
-                {isOnline ? 'MODE EN LIGNE' : 'CONNEXION PERDUE'}
-              </span>
-            </div>
-          </div>
+        {/* ── Connectivity & System Health ── */}
+        <div className="mt-auto px-2 pb-6 space-y-3 border-t border-white/5 pt-6">
+          <div className={`
+            relative overflow-hidden rounded-3xl border transition-all duration-500 p-4
+            ${!isOnline 
+                ? 'bg-rose-500/5 border-rose-500/20' 
+                : pendingSyncCount > 0 
+                  ? 'bg-amber-500/5 border-amber-500/20' 
+                  : 'bg-emerald-500/5 border-emerald-500/20'
+            }
+          `}>
+            {/* Background Glow */}
+            <div className={`
+              absolute -right-4 -top-4 size-24 blur-3xl opacity-20 transition-colors duration-1000
+              ${!isOnline ? 'bg-rose-500' : pendingSyncCount > 0 ? 'bg-amber-500' : 'bg-emerald-500'}
+            `} />
 
-          {/* 2. Sync Status Block */}
-          <div className="space-y-3">
-            {pendingSyncCount > 0 ? (
-              <div className="bg-amber-500/5 border border-amber-500/20 rounded-[2rem] p-5 animate-in fade-in zoom-in duration-500">
-                <div className="flex items-center gap-3 mb-4">
-                  <div className="size-2.5 bg-amber-500 rounded-full animate-pulse shadow-[0_0_12px_rgba(245,158,11,0.5)]" />
-                  <div className="flex flex-col">
-                    <span className="text-[0.65rem] font-black text-amber-500 uppercase tracking-widest leading-tight">Sync</span>
-                    <span className="text-[0.55rem] font-bold text-amber-500/60 uppercase tracking-[0.15em]">
-                      {pendingSyncCount} action{pendingSyncCount > 1 ? 's' : ''} en attente
-                    </span>
+            <div className="relative z-10 space-y-4">
+              {/* Status Header */}
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className={`
+                    size-2.5 rounded-full shadow-lg transition-all duration-500
+                    ${!isOnline 
+                        ? 'bg-rose-500 shadow-rose-500/50 animate-pulse' 
+                        : pendingSyncCount > 0 
+                          ? 'bg-amber-500 shadow-amber-500/50 animate-bounce' 
+                          : 'bg-emerald-500 shadow-emerald-500/50'
+                    }
+                  `} />
+                  <span className={`
+                    text-[0.65rem] font-black uppercase tracking-widest
+                    ${!isOnline ? 'text-rose-400' : pendingSyncCount > 0 ? 'text-amber-400' : 'text-emerald-400'}
+                  `}>
+                    {!isOnline ? 'Mode Hors-Ligne' : pendingSyncCount > 0 ? 'Actions en attente' : 'Système à jour'}
+                  </span>
+                </div>
+                {isSyncing && <Loader2 size={12} className="animate-spin text-blue-400" />}
+              </div>
+
+              {/* Status Message */}
+              <div className="space-y-1">
+                <p className="text-xs font-bold text-white leading-tight">
+                  {!isOnline 
+                    ? (pendingSyncCount > 0 ? `${pendingSyncCount} action(s) sauvegardée(s)` : 'Connexion perdue') 
+                    : pendingSyncCount > 0 
+                      ? `${pendingSyncCount} action(s) à synchroniser` 
+                      : 'Données synchronisées'}
+                </p>
+                <p className="text-[0.6rem] font-medium text-slate-500 leading-relaxed uppercase tracking-tighter">
+                  {!isOnline 
+                    ? (pendingSyncCount > 0 ? 'Synchronisation dès le retour du réseau' : 'Vos modifications sont sauvegardées localement') 
+                    : pendingSyncCount > 0 
+                      ? 'Cliquez pour forcer la mise à jour SAP' 
+                      : 'Tout est en règle avec le serveur central'}
+                </p>
+              </div>
+
+              {/* Pending Actions List */}
+              {syncActions.length > 0 && (
+                <div className="space-y-2 mt-4 pt-4 border-t border-white/5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[0.55rem] font-black text-slate-600 uppercase tracking-widest">Activités en file d'attente</span>
+                  </div>
+                  <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1 scrollbar-hide">
+                    {syncActions.map((action) => (
+                      <div key={action.id} className={`p-2 rounded-lg border transition-all ${
+                        action.status === 'error' 
+                          ? 'bg-rose-500/10 border-rose-500/20' 
+                          : 'bg-white/5 border-white/5'
+                      }`}>
+                        <div className="flex items-center justify-between group/act">
+                          <div className="flex items-center gap-2 min-w-0">
+                             <div className={`size-1.5 rounded-full shrink-0 ${action.status === 'error' ? 'bg-rose-500' : 'bg-amber-500 animate-pulse'}`} />
+                             <span className="font-bold text-slate-300 uppercase truncate text-[0.6rem]">
+                                {ACTION_NAMES[action.type] || action.type.replace(/_/g, ' ')}
+                             </span>
+                          </div>
+                          <div className="flex items-center gap-2 shrink-0">
+                            <span className="text-[0.5rem] font-medium text-slate-600">
+                              {new Date(action.timestamp).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
+                            </span>
+                            <button 
+                              onClick={async (e) => {
+                                e.stopPropagation();
+                                if (confirm('Supprimer cette action de la file d\'attente ?')) {
+                                  await db.syncQueue.delete(action.id!);
+                                }
+                              }}
+                              className={`p-1 hover:text-rose-500 transition-all ${
+                                action.status === 'error' ? 'text-rose-500' : 'opacity-0 group-hover/act:opacity-100 text-slate-600'
+                              }`}
+                            >
+                              <Trash2 size={10} />
+                            </button>
+                          </div>
+                        </div>
+                        {action.status === 'error' && action.errorMessage && (
+                          <div className="mt-1 text-[0.55rem] text-rose-400 font-bold leading-tight border-t border-rose-500/10 pt-1 flex items-start gap-1">
+                            <AlertCircle size={8} className="shrink-0 mt-0.5" />
+                            <span>{action.errorMessage}</span>
+                          </div>
+                        )}
+                      </div>
+                    ))}
                   </div>
                 </div>
-                
+              )}
+
+              {/* Action Button (Only if pending or offline) */}
+              {(pendingSyncCount > 0 || !isOnline) && (
                 <button
                   onClick={handleManualSync}
                   disabled={isSyncing || !isOnline}
-                  className={`w-full py-3 rounded-2xl flex items-center justify-center gap-2 text-[0.6rem] font-black uppercase tracking-[0.2em] transition-all ${
-                    isOnline 
-                      ? 'bg-amber-500 text-white hover:bg-amber-400 shadow-lg shadow-amber-500/20 active:scale-95' 
-                      : 'bg-slate-800 text-slate-500 cursor-not-allowed opacity-50'
-                  }`}
+                  className={`
+                    w-full py-2.5 rounded-xl flex items-center justify-center gap-2 text-[0.6rem] font-black uppercase tracking-widest transition-all
+                    ${isOnline 
+                      ? 'bg-amber-500 text-white hover:bg-amber-400 shadow-lg shadow-amber-500/20 active:scale-95 mt-2' 
+                      : 'bg-slate-800 text-slate-500 cursor-not-allowed opacity-50 mt-2'
+                    }
+                  `}
                 >
-                  {isSyncing ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
-                  {isSyncing ? 'Synchronisation...' : 'Synchroniser'}
+                  {isSyncing ? (
+                    <Loader2 size={12} className="animate-spin" />
+                  ) : (
+                    <RefreshCw size={12} />
+                  )}
+                  {isSyncing ? 'En cours...' : !isOnline ? 'Attente Réseau' : 'Synchroniser'}
                 </button>
-              </div>
-            ) : (
-              <div className="px-5 py-4 rounded-[2rem] border bg-[#0d1a1a] border-emerald-500/20 flex items-center gap-4 transition-all duration-700">
-                <div className="size-2.5 bg-emerald-500 rounded-full shadow-[0_0_10px_rgba(16,185,129,0.4)] shrink-0" />
-                <div className="flex flex-col">
-                  <span className="text-[0.65rem] font-black text-emerald-500 uppercase tracking-[0.2em] leading-tight">Données</span>
-                  <span className="text-[0.65rem] font-black text-emerald-500 uppercase tracking-[0.2em] leading-tight">Synchronisées</span>
-                </div>
-              </div>
-            )}
+              )}
+            </div>
           </div>
         </div>
 

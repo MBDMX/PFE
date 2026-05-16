@@ -35,6 +35,12 @@ async def login(u: UserLogin, db: Prisma = Depends(get_db)):
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Mot de passe incorrect"
         )
+    
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Votre compte a été désactivé par un administrateur."
+        )
 
     data          = make_token_data(user)
     access_token  = create_access_token(data=data)
