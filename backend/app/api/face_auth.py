@@ -1,60 +1,60 @@
-from fastapi import APIRouter, Depends, HTTPException, status
-import json
-import math
+from fastapi import APIRouter, Depends, HTTPException, status # Composants pour fabriquer les tiroirs de l'API
+import json # Outil pour stocker/lire des listes au format texte simple
+import math # Outil de mathématiques (racine carrée, puissance)
 from typing import List, Optional
 
-from prisma import Prisma
+from prisma import Prisma # Notre majordome de base de données SQL
 from app.db.session import get_db
-from app.api.auth import make_token_data
-from app.core.security import create_access_token, create_refresh_token
-from pydantic import BaseModel
+from app.api.auth import make_token_data # Fabrique le paquet d'informations de l'utilisateur
+from app.core.security import create_access_token, create_refresh_token # Fabrique les clés d'accès JWT sécurisées
+from pydantic import BaseModel # Modèle pour valider le format des données reçues
 
-from app.api.deps import get_current_user
+from app.api.deps import get_current_user # Vérifie qui appelle l'API
 
 router = APIRouter()
 
-LOG_FILE = "face_debug_log.txt"
+LOG_FILE = "face_debug_log.txt" # Fichier texte pour enregistrer les tentatives de connexion
 
 def log(msg: str):
-    """Write a log message to the debug file using UTF-8 to avoid Windows encoding errors."""
+    """Enregistre un message dans notre fichier journal pour le débogage."""
     try:
         with open(LOG_FILE, "a", encoding="utf-8") as f:
             f.write(msg + "\n")
     except Exception:
-        pass  # Never let logging crash the app
+        pass  # Empêche un bug d'écriture de faire planter l'application
 
 
 class FaceDescriptorSchema(BaseModel):
-    descriptor: List[float]
+    descriptor: List[float] # Une liste de 128 chiffres décrivant les distances du visage
 
 class FaceEnrollSchema(BaseModel):
-    """Supports enrolling multiple descriptors (5 samples) for better accuracy."""
-    descriptors: List[List[float]]  # List of 128-float vectors
+    """Permet d'enregistrer 5 photos de visages différentes pour être plus précis."""
+    descriptors: List[List[float]]  # Liste de 5 visages (chacun décrit par 128 chiffres)
 
 
+# 📐 LE CALCULATEUR DE DISTANCE DE VISAGE (Distance Euclidienne) :
+# C'est une formule mathématique (théorème de Pythagore généralisé)
+# Elle mesure l'écart géométrique exact entre deux visages.
 def euclidean_distance(v1: List[float], v2: List[float]) -> float:
     if len(v1) != len(v2):
-        return 1.0
+        return 1.0 # Si les deux visages n'ont pas le même nombre de mesures, ils sont totalement différents
     return math.sqrt(sum((a - b) ** 2 for a, b in zip(v1, v2)))
 
 
 def best_distance_against_stored(candidate: List[float], stored_json: str) -> float:
     """
-    Compare candidate against stored descriptor(s).
-    Stored can be either:
-      - A single descriptor: [0.1, 0.2, ...]         (legacy)
-      - Multiple descriptors: [[0.1, ...], [0.2, ...]] (new multi-sample)
-    Returns the MINIMUM distance found (best match).
+    Compare le visage devant la caméra avec le ou les visages enregistrés en base.
+    Renvoie la plus petite distance trouvée (le meilleur score).
     """
-    stored = json.loads(stored_json)
+    stored = json.loads(stored_json) # Décode le texte stocké en base en liste exploitable
 
-    # Detect format: list of floats = single descriptor
+    # Si un seul visage est enregistré
     if stored and isinstance(stored[0], float):
         return euclidean_distance(candidate, stored)
 
-    # List of lists = multiple descriptors → take best match
+    # Si plusieurs échantillons (5 photos) sont enregistrés, on compare avec chacun d'eux
     distances = [euclidean_distance(candidate, desc) for desc in stored if isinstance(desc, list)]
-    return min(distances) if distances else 1.0
+    return min(distances) if distances else 1.0 # Renvoie le score de la photo la plus ressemblante
 
 
 @router.post("/face/enroll")
@@ -63,10 +63,7 @@ async def enroll_face(
     db: Prisma = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    """
-    LEGACY single-descriptor enrollment. Kept for backward compatibility.
-    Prefer /face/enroll-multi for better stability.
-    """
+    """Enregistre une seule photo du visage de l'utilisateur."""
     await db.user.update(
         where={"id": current_user.id},
         data={"face_descriptor": json.dumps(data.descriptor)},
@@ -81,10 +78,7 @@ async def enroll_face_multi(
     db: Prisma = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    """
-    Enrolls multiple face samples (recommended: 5 samples).
-    Stores as a list of descriptors → better stability across lighting/angle changes.
-    """
+    """Enregistre 5 photos différentes du visage pour plus de stabilité (conseillé)."""
     if len(data.descriptors) < 1:
         raise HTTPException(status_code=400, detail="Au moins 1 descripteur requis")
 
@@ -99,27 +93,19 @@ async def enroll_face_multi(
 @router.post("/face/login")
 async def face_login(data: FaceDescriptorSchema):
     """
-    Finds a user whose stored descriptor(s) match the input.
-
-    face-api.js uses EUCLIDEAN distance (NOT cosine similarity):
-      - Same person:      distance ≈ 0.30–0.45
-      - Different person: distance ≈ 0.60–1.0
-
-    Security thresholds:
-      - THRESHOLD = 0.45  → Must be within 0.45 euclidean distance to match
-      - MIN_GAP   = 0.12  → Best match must be at least 0.12 BETTER than 2nd best
-                            (prevents confusion between two enrolled users)
+    Tiroir de connexion par reconnaissance faciale.
+    Compare le visage devant la caméra avec tous les utilisateurs de la base de données.
     """
     from app.db.session import prisma as db
 
-    # --- Euclidean distance thresholds (face-api.js) ---
-    THRESHOLD = 0.55   # Permissive enough for lighting/angle variation
-    MIN_GAP   = 0.08   # Matches frontend MIN_GAP
+    # 📏 SEUILS DE SÉCURITÉ :
+    THRESHOLD = 0.55   # Si la distance est inférieure à 0.55, c'est la bonne personne
+    MIN_GAP   = 0.08   # Évite de confondre deux personnes qui se ressemblent (ex: des jumeaux)
 
     try:
         log("[FACE LOGIN] Request received")
 
-        # --- 1. Fetch all users with a face profile ---
+        # ── 1. RÉCUPÉRATION DES UTILISATEURS AVEC UN VISAGE ENREGISTRÉ ──
         all_users = await db.user.find_many()
         users_with_face = [u for u in all_users if getattr(u, "face_descriptor", None)]
         log(f"[FACE LOGIN] {len(users_with_face)} user(s) with face profile")
@@ -127,7 +113,7 @@ async def face_login(data: FaceDescriptorSchema):
         if not users_with_face:
             raise HTTPException(status_code=401, detail="Aucun profil facial enregistré")
 
-        # --- 2. Compute distances for ALL users ---
+        # ── 2. CALCUL DE LA DISTANCE POUR TOUS LES UTILISATEURS ──
         results = []
         for user in users_with_face:
             try:
@@ -141,17 +127,18 @@ async def face_login(data: FaceDescriptorSchema):
         if not results:
             raise HTTPException(status_code=401, detail="Visage non reconnu")
 
-        # Sort by distance ascending (best match first)
+        # Trie du plus ressemblant au moins ressemblant
         results.sort(key=lambda x: x[0])
-        best_dist, best_match = results[0]
+        best_dist, best_match = results[0] # Récupère le meilleur candidat
 
-        # --- 3. Strict threshold check ---
+        # ── 3. VÉRIFICATION DU SEUIL STRICT ──
         if best_dist >= THRESHOLD:
             log(f"[FACE LOGIN] REJECTED — best dist={best_dist:.4f} >= threshold={THRESHOLD}")
             raise HTTPException(status_code=401, detail="Visage non reconnu")
 
-        # --- 4. Anti-confusion check (MIN_GAP) ---
-        # If there's a 2nd candidate and it's too close to the best → reject to avoid confusion
+        # ── 4. SÉCURITÉ ANTI-CONFUSION (MIN_GAP) ──
+        # Si le 2ème candidat le plus ressemblant a un score trop proche du 1er,
+        # on refuse la connexion par sécurité pour éviter toute confusion d'identité.
         if len(results) >= 2:
             second_dist = results[1][0]
             gap = second_dist - best_dist
@@ -163,7 +150,7 @@ async def face_login(data: FaceDescriptorSchema):
                     detail="Identification ambiguë — veuillez repositionner votre visage"
                 )
 
-        # --- 5. Success ---
+        # ── 5. SUCCÈS : CONNEXION ET ENVOI DU JETON JWT ──
         log(f"[FACE LOGIN] MATCH: {best_match.username} (dist={best_dist:.4f})")
         token_data = make_token_data(best_match)
         return {

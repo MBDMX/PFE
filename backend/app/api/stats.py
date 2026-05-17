@@ -8,14 +8,24 @@ from app.schemas.schemas import Stats as StatsSchema, ManagerStats
 
 router = APIRouter(tags=["stats"])
 
-@router.get("/stats", response_model=StatsSchema)
+@router.get("/stats")
 async def get_stats(db: Prisma = Depends(get_db)):
+    all_wos = await db.workorder.find_many()
+    done_statuses = {"done", "closed"}
+    total_ot = len(all_wos)
+    done_ot = sum(1 for o in all_wos if o.status in done_statuses)
+    res_rate = round((done_ot / total_ot) * 100) if total_ot > 0 else 0
+
     return {
         "totalMachines": await db.machine.count(),
         "operational": await db.machine.count(where={"status": "operational"}),
         "openOrders": await db.workorder.count(where={"status": {"not": "done"}}),
         "lowStock": await db.stock.count(where={"quantity": {"lte": 5}}),
         "totalTechnicians": await db.user.count(where={"role": "technician"}),
+        # Enriched fields for Admin Dashboard Recharts and KPIs
+        "totalOT": total_ot,
+        "doneOT": done_ot,
+        "resolutionRate": res_rate,
     }
 
 @router.get("/manager-stats", response_model=ManagerStats)

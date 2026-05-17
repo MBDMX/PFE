@@ -2,20 +2,21 @@
 import './globals.css';
 import '@fontsource-variable/outfit';
 import Link from 'next/link';
-import { usePathname, useRouter } from 'next/navigation';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import {
   LayoutDashboard, Wrench, ClipboardList,
   Package, LogOut, ShieldCheck, Settings, ChevronRight, Users, Warehouse,
   RefreshCw, Clock, Square, AlertTriangle, Loader2, Bell, Activity, CheckCircle,
   Trash2, AlertCircle, Wifi, WifiOff
 } from 'lucide-react';
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, Suspense } from 'react';
 import { gmaoApi } from '../services/api';
 import { ToastProvider, useToast } from '../components/ui/toast';
 import { db } from '../lib/db';
 import { useLiveQuery } from 'dexie-react-hooks';
 import axios from 'axios';
 import GuideBubble from '../components/GuideBubble';
+import GlobalTimerBar from '../components/GlobalTimerBar';
 
 // ────────────────────────────────────────────
 // Types & Helpers
@@ -53,148 +54,31 @@ const ROLE_ROUTES: Record<string, string> = {
   magasinier: '/dashboard/magasinier',
 };
 
-// ────────────────────────────────────────────
-// Components
-// ────────────────────────────────────────────
-function GlobalTimerBar() {
-  const [activeSession, setActiveSession] = useState<any>(null);
-  const [elapsed, setElapsed] = useState(0);
-  const intervalRef = useRef<any>(null);
-  const pathname = usePathname();
-  const { success, error } = useToast();
-
-  useEffect(() => {
-    fetchSession();
-  }, [pathname]);
-
-  const fetchSession = async () => {
-    // Skip entirely if backend unreachable — prevents ERR_CONNECTION_REFUSED spam
-    if (typeof window === 'undefined' || !navigator.onLine) return;
-    try {
-      const session = await gmaoApi.getTimerActive();
-      setActiveSession(session);
-      if (session) {
-        startTimer(session.start_time, session.total_previous_seconds || 0);
-      } else {
-        stopTimer();
-      }
-    } catch {
-      // Backend offline — silently ignore, no console spam
-      stopTimer();
-    }
-  };
-
-  const startTimer = (startTimeStr: string, previousSeconds: number = 0) => {
-    if (intervalRef.current) clearInterval(intervalRef.current);
-    const start = new Date(startTimeStr).getTime();
-    intervalRef.current = setInterval(() => {
-      const currentSessionSeconds = Math.floor((new Date().getTime() - start) / 1000);
-      setElapsed(previousSeconds + currentSessionSeconds);
-    }, 1000);
-  };
-
-  const stopTimer = () => {
-    if (intervalRef.current) clearInterval(intervalRef.current);
-    intervalRef.current = null;
-    setElapsed(0);
-  };
-
-  useEffect(() => {
-    fetchSession();
-    return () => stopTimer();
-  }, [pathname]);
-
-  const handleStop = async (finish: boolean = false) => {
-    if (!activeSession) return;
-    try {
-      const stopData = finish ? { status: 'done' } : { status: 'in_progress' };
-      await gmaoApi.stopTimer(String(activeSession.work_order_id), stopData);
-      
-      if (finish) {
-        success("Intervention terminée !");
-      } else {
-        success("Intervention en pause.");
-      }
-      
-      stopTimer();
-      setActiveSession(null);
-      // Mettre à jour Dexie au lieu de reload()
-      gmaoApi.getWorkOrder(String(activeSession.work_order_id)).then(wo => db.workOrders.put(wo));
-    } catch (err) {
-      error("Erreur lors de l'action");
-    }
-  };
-
-  if (!activeSession) return null;
-
-  const formatTime = (s: number) => {
-    const h = Math.floor(s / 3600);
-    const m = Math.floor((s % 3600) / 60);
-    const sec = s % 60;
-    return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${sec.toString().padStart(2, '0')}`;
-  };
-
-  return (
-    <div className="fixed bottom-0 left-0 right-0 z-[100] bg-blue-600/90 backdrop-blur-md border-t border-blue-400/30 px-6 py-3 flex items-center justify-between shadow-[0_-10px_40px_rgba(37,99,235,0.4)] animate-in slide-in-from-bottom-full duration-500 rounded-t-2xl mx-4 sm:mx-8 mb-4">
-      <div className="flex items-center gap-4">
-        <div className="size-10 rounded-full bg-white/20 flex items-center justify-center text-white animate-pulse">
-          <Clock size={20} />
-        </div>
-        <div>
-          <div className="text-[0.6rem] font-black text-blue-100 uppercase tracking-[0.2em] mb-0.5 opacity-80">Intervention en cours</div>
-          <div className="text-sm font-black text-white flex items-center gap-2">
-            OT #{activeSession.work_order_id}
-            <span className="size-1.5 rounded-full bg-blue-300" />
-            {activeSession.title || 'Mission Technique'}
-          </div>
-        </div>
-      </div>
-
-      <div className="flex items-center gap-3 sm:gap-6">
-        <div className="text-xl sm:text-3xl font-black text-white tabular-nums tracking-tighter mr-2">
-          {formatTime(elapsed)}
-        </div>
-        <div className="flex gap-2">
-          <button
-            onClick={() => handleStop(false)}
-            className="bg-white/20 hover:bg-white/30 text-white px-3 sm:px-5 py-2 rounded-xl font-black text-[0.65rem] sm:text-xs uppercase tracking-widest transition-all active:scale-95 flex items-center gap-2"
-            title="Mettre en pause"
-          >
-            <Clock size={14} /> <span className="hidden sm:inline">Pause</span>
-          </button>
-          <button
-            onClick={() => handleStop(true)}
-            className="bg-white text-blue-600 px-4 sm:px-6 py-2 rounded-xl font-black text-[0.65rem] sm:text-xs uppercase tracking-widest hover:bg-blue-50 transition-all shadow-lg active:scale-95 flex items-center gap-2 whitespace-nowrap"
-          >
-            <CheckCircle size={14} fill="currentColor" className="text-blue-600" /> <span className="hidden sm:inline">Terminer la tâche</span><span className="sm:hidden">Fin</span>
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
+// GlobalTimerBar component is imported from components/GlobalTimerBar
 
 // ────────────────────────────────────────────
 // Client Content Wrapper (Uses Contexts)
 // ────────────────────────────────────────────
 const ACTION_NAMES: Record<string, string> = {
-    CREATE_WORK_ORDER: 'Création OT',
-    UPDATE_WORK_ORDER: 'Mise à jour OT',
-    DELETE_WORK_ORDER: 'Suppression OT',
-    ADD_PART: 'Ajout de pièce',
-    CREATE_PARTS_REQUEST: 'Demande de pièces',
-    CREATE_STOCK_MOVEMENT: 'Mouvement Stock',
-    TIMER_START: 'Démarrage Chrono',
-    TIMER_STOP: 'Arrêt Chrono',
-    APPROVE_DELETION: 'Approbation Suppr.',
-    REJECT_DELETION: 'Rejet Suppression',
-    SYNC_SAP_MACHINES: 'Sync SAP Machines',
-    SYNC_SAP_OTS: 'Sync SAP OT'
+  CREATE_WORK_ORDER: 'Création OT',
+  UPDATE_WORK_ORDER: 'Mise à jour OT',
+  DELETE_WORK_ORDER: 'Suppression OT',
+  ADD_PART: 'Ajout de pièce',
+  CREATE_PARTS_REQUEST: 'Demande de pièces',
+  CREATE_STOCK_MOVEMENT: 'Mouvement Stock',
+  TIMER_START: 'Démarrage Chrono',
+  TIMER_STOP: 'Arrêt Chrono',
+  APPROVE_DELETION: 'Approbation Suppr.',
+  REJECT_DELETION: 'Rejet Suppression',
+  SYNC_SAP_MACHINES: 'Sync SAP Machines',
+  SYNC_SAP_OTS: 'Sync SAP OT'
 };
 
 function ClientAppWrapper({ children }: { children: React.ReactNode }) {
   const path = usePathname();
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const currentTab = searchParams.get('tab') || 'overview';
   const [user, setUser] = useState<JWTUser | null>(null);
   const [isOnline, setIsOnline] = useState(true);
   const [pendingSyncCount, setPendingSyncCount] = useState(0);
@@ -214,9 +98,9 @@ function ClientAppWrapper({ children }: { children: React.ReactNode }) {
       const img = new Image();
       // Timeout très court (1.5s) pour détecter la perte de WiFi instantanément
       const timer = setTimeout(() => { img.src = ""; setIsOnline(false); }, 1500);
-      
+
       img.src = "https://www.google.com/favicon.ico?t=" + Date.now();
-      
+
       img.onload = () => {
         clearTimeout(timer);
         setIsOnline(prev => {
@@ -228,7 +112,7 @@ function ClientAppWrapper({ children }: { children: React.ReactNode }) {
           return true;
         });
       };
-      
+
       img.onerror = () => {
         clearTimeout(timer);
         setIsOnline(false);
@@ -259,7 +143,7 @@ function ClientAppWrapper({ children }: { children: React.ReactNode }) {
         // Only try to register if we are NOT in local dev or if we explicitly need it
         navigator.serviceWorker.register('/sw.js', { updateViaCache: 'none' })
           .then(reg => {
-             // console.log('SW Registered', reg.scope);
+            // console.log('SW Registered', reg.scope);
           })
           .catch(err => {
             if (err.name !== 'AbortError') console.error('SW Failed', err);
@@ -292,7 +176,7 @@ function ClientAppWrapper({ children }: { children: React.ReactNode }) {
           warning("Action Hors-Ligne", "Enregistré localement.");
         }
         prevCountRef.current = total;
-        
+
         setPendingSyncCount(total);
         setSyncStatus({ pending, errors, total });
         setSyncActions(all);
@@ -303,10 +187,10 @@ function ClientAppWrapper({ children }: { children: React.ReactNode }) {
 
     updateCount();
     const interval = setInterval(updateCount, 1000);
-    
+
     // Écouter le signal global pour une mise à jour INSTANTANÉE
     window.addEventListener('sync-queue-updated', updateCount);
-    
+
     return () => {
       clearInterval(interval);
       window.removeEventListener('sync-queue-updated', updateCount);
@@ -505,14 +389,14 @@ function ClientAppWrapper({ children }: { children: React.ReactNode }) {
           {user?.role === 'admin' && (
             <>
               {[
-                { tab: 'overview',       label: 'Home',             Icon: LayoutDashboard },
-                { tab: 'users',          label: 'Utilisateurs',     Icon: Users },
-                { tab: 'settings',       label: 'Paramètres',       Icon: Settings },
-              ].map(({ tab, label, Icon, badge }: { tab: string; label: string; Icon: any; badge?: number }) => {
+                { tab: 'overview', label: 'Home', Icon: LayoutDashboard, id: 'nav-dashboard' },
+                { tab: 'users', label: 'Utilisateurs', Icon: Users },
+                { tab: 'settings', label: 'Paramètres', Icon: Settings },
+              ].map(({ tab, label, Icon, id, badge }: { tab: string; label: string; Icon: any; id?: string; badge?: number }) => {
                 const href = `/dashboard/admin?tab=${tab}`;
-                const isActive = path.startsWith('/dashboard/admin') && (path.includes(`tab=${tab}`) || (tab === 'overview' && !path.includes('tab=')));
+                const isActive = path.startsWith('/dashboard/admin') && currentTab === tab;
                 return (
-                  <Link key={tab} href={href} className={`sidebar-link ${isActive ? 'active' : ''} relative`}>
+                  <Link key={tab} href={href} id={id} className={`sidebar-link ${isActive ? 'active' : ''} relative`}>
                     <Icon size={20} />
                     <span>{label}</span>
                     {badge && badge > 0 ? (
@@ -532,7 +416,7 @@ function ClientAppWrapper({ children }: { children: React.ReactNode }) {
           {user?.role !== 'admin' && (
             <>
               {user?.role === 'magasinier' && (
-                <Link href="/dashboard/magasinier" className={`sidebar-link ${path.startsWith('/dashboard/magasinier') ? 'active' : ''}`}>
+                <Link href="/dashboard/magasinier" id="nav-dashboard" className={`sidebar-link ${path.startsWith('/dashboard/magasinier') ? 'active' : ''}`}>
                   <Warehouse size={20} />
                   <span>Dashboard</span>
                   {path.startsWith('/dashboard/magasinier') && <ChevronRight size={14} className="ml-auto text-blue-400" />}
@@ -541,7 +425,7 @@ function ClientAppWrapper({ children }: { children: React.ReactNode }) {
 
               {user?.role !== 'magasinier' && (
                 <>
-                  <Link href={getDashHref()} className={`sidebar-link ${path.startsWith('/dashboard') && !path.startsWith('/dashboard/magasinier') ? 'active' : ''}`}>
+                  <Link href={getDashHref()} id="nav-dashboard" className={`sidebar-link ${path.startsWith('/dashboard') && !path.startsWith('/dashboard/magasinier') ? 'active' : ''}`}>
                     <LayoutDashboard size={20} />
                     <span>Dashboard</span>
                     {path.startsWith('/dashboard') && !path.startsWith('/dashboard/magasinier') && <ChevronRight size={14} className="ml-auto text-blue-400" />}
@@ -593,13 +477,13 @@ function ClientAppWrapper({ children }: { children: React.ReactNode }) {
 
         {/* ── Connectivity & System Health ── */}
         <div className="mt-auto px-2 pb-6 space-y-3 border-t border-white/5 pt-6">
-          <div className={`
+          <div id="sidebar-sync-btn" className={`
             relative overflow-hidden rounded-3xl border transition-all duration-500 p-4
-            ${!isOnline 
-                ? 'bg-rose-500/5 border-rose-500/20' 
-                : pendingSyncCount > 0 
-                  ? 'bg-amber-500/5 border-amber-500/20' 
-                  : 'bg-emerald-500/5 border-emerald-500/20'
+            ${!isOnline
+              ? 'bg-rose-500/5 border-rose-500/20'
+              : pendingSyncCount > 0
+                ? 'bg-amber-500/5 border-amber-500/20'
+                : 'bg-emerald-500/5 border-emerald-500/20'
             }
           `}>
             {/* Background Glow */}
@@ -614,11 +498,11 @@ function ClientAppWrapper({ children }: { children: React.ReactNode }) {
                 <div className="flex items-center gap-3">
                   <div className={`
                     size-2.5 rounded-full shadow-lg transition-all duration-500
-                    ${!isOnline 
-                        ? 'bg-rose-500 shadow-rose-500/50 animate-pulse' 
-                        : pendingSyncCount > 0 
-                          ? 'bg-amber-500 shadow-amber-500/50 animate-bounce' 
-                          : 'bg-emerald-500 shadow-emerald-500/50'
+                    ${!isOnline
+                      ? 'bg-rose-500 shadow-rose-500/50 animate-pulse'
+                      : pendingSyncCount > 0
+                        ? 'bg-amber-500 shadow-amber-500/50 animate-bounce'
+                        : 'bg-emerald-500 shadow-emerald-500/50'
                     }
                   `} />
                   <span className={`
@@ -634,17 +518,17 @@ function ClientAppWrapper({ children }: { children: React.ReactNode }) {
               {/* Status Message */}
               <div className="space-y-1">
                 <p className="text-xs font-bold text-white leading-tight">
-                  {!isOnline 
-                    ? (pendingSyncCount > 0 ? `${pendingSyncCount} action(s) sauvegardée(s)` : 'Connexion perdue') 
-                    : pendingSyncCount > 0 
-                      ? `${pendingSyncCount} action(s) à synchroniser` 
+                  {!isOnline
+                    ? (pendingSyncCount > 0 ? `${pendingSyncCount} action(s) sauvegardée(s)` : 'Connexion perdue')
+                    : pendingSyncCount > 0
+                      ? `${pendingSyncCount} action(s) à synchroniser`
                       : 'Données synchronisées'}
                 </p>
                 <p className="text-[0.6rem] font-medium text-slate-500 leading-relaxed uppercase tracking-tighter">
-                  {!isOnline 
-                    ? (pendingSyncCount > 0 ? 'Synchronisation dès le retour du réseau' : 'Vos modifications sont sauvegardées localement') 
-                    : pendingSyncCount > 0 
-                      ? 'Cliquez pour forcer la mise à jour SAP' 
+                  {!isOnline
+                    ? (pendingSyncCount > 0 ? 'Synchronisation dès le retour du réseau' : 'Vos modifications sont sauvegardées localement')
+                    : pendingSyncCount > 0
+                      ? 'Cliquez pour forcer la mise à jour SAP'
                       : 'Tout est en règle avec le serveur central'}
                 </p>
               </div>
@@ -657,32 +541,30 @@ function ClientAppWrapper({ children }: { children: React.ReactNode }) {
                   </div>
                   <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1 scrollbar-hide">
                     {syncActions.map((action) => (
-                      <div key={action.id} className={`p-2 rounded-lg border transition-all ${
-                        action.status === 'error' 
-                          ? 'bg-rose-500/10 border-rose-500/20' 
-                          : 'bg-white/5 border-white/5'
-                      }`}>
+                      <div key={action.id} className={`p-2 rounded-lg border transition-all ${action.status === 'error'
+                        ? 'bg-rose-500/10 border-rose-500/20'
+                        : 'bg-white/5 border-white/5'
+                        }`}>
                         <div className="flex items-center justify-between group/act">
                           <div className="flex items-center gap-2 min-w-0">
-                             <div className={`size-1.5 rounded-full shrink-0 ${action.status === 'error' ? 'bg-rose-500' : 'bg-amber-500 animate-pulse'}`} />
-                             <span className="font-bold text-slate-300 uppercase truncate text-[0.6rem]">
-                                {ACTION_NAMES[action.type] || action.type.replace(/_/g, ' ')}
-                             </span>
+                            <div className={`size-1.5 rounded-full shrink-0 ${action.status === 'error' ? 'bg-rose-500' : 'bg-amber-500 animate-pulse'}`} />
+                            <span className="font-bold text-slate-300 uppercase truncate text-[0.6rem]">
+                              {ACTION_NAMES[action.type] || action.type.replace(/_/g, ' ')}
+                            </span>
                           </div>
                           <div className="flex items-center gap-2 shrink-0">
                             <span className="text-[0.5rem] font-medium text-slate-600">
                               {new Date(action.timestamp).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
                             </span>
-                            <button 
+                            <button
                               onClick={async (e) => {
                                 e.stopPropagation();
                                 if (confirm('Supprimer cette action de la file d\'attente ?')) {
                                   await db.syncQueue.delete(action.id!);
                                 }
                               }}
-                              className={`p-1 hover:text-rose-500 transition-all ${
-                                action.status === 'error' ? 'text-rose-500' : 'opacity-0 group-hover/act:opacity-100 text-slate-600'
-                              }`}
+                              className={`p-1 hover:text-rose-500 transition-all ${action.status === 'error' ? 'text-rose-500' : 'opacity-0 group-hover/act:opacity-100 text-slate-600'
+                                }`}
                             >
                               <Trash2 size={10} />
                             </button>
@@ -707,8 +589,8 @@ function ClientAppWrapper({ children }: { children: React.ReactNode }) {
                   disabled={isSyncing || !isOnline}
                   className={`
                     w-full py-2.5 rounded-xl flex items-center justify-center gap-2 text-[0.6rem] font-black uppercase tracking-widest transition-all
-                    ${isOnline 
-                      ? 'bg-amber-500 text-white hover:bg-amber-400 shadow-lg shadow-amber-500/20 active:scale-95 mt-2' 
+                    ${isOnline
+                      ? 'bg-amber-500 text-white hover:bg-amber-400 shadow-lg shadow-amber-500/20 active:scale-95 mt-2'
                       : 'bg-slate-800 text-slate-500 cursor-not-allowed opacity-50 mt-2'
                     }
                   `}
@@ -779,9 +661,15 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       </head>
       <body suppressHydrationWarning className="bg-slate-950 text-slate-100 min-h-screen">
         <ToastProvider>
-          <ClientAppWrapper>
-            {children}
-          </ClientAppWrapper>
+          <Suspense fallback={
+            <div className="flex justify-center items-center min-h-screen bg-slate-950">
+              <Loader2 className="animate-spin text-blue-500" size={32} />
+            </div>
+          }>
+            <ClientAppWrapper>
+              {children}
+            </ClientAppWrapper>
+          </Suspense>
         </ToastProvider>
       </body>
     </html>

@@ -1,18 +1,28 @@
 'use client';
-
+/**
+ * 🎓 JOUR 2 : AUTHENTIFICATION BIOMÉTRIQUE INSTANTANÉE (FACE RECOGNITION)
+ * Ce composant gère l'authentification par reconnaissance faciale à l'aide de face-api.js.
+ * 
+ * Concepts Clés à valoriser en soutenance :
+ * 1. Traitement côté client pur : La détection de visage et le calcul du "Face Descriptor" (vecteur de 128 nombres)
+ *    sont faits localement sur le CPU/GPU du navigateur pour des raisons de confidentialité et de rapidité !
+ * 2. Préchargement en arrière-plan : Les modèles de Deep Learning (SsdMobilenetv1 et Landmarks) et les visages 
+ *    des utilisateurs sont préchargés dès l'affichage de l'écran de login pour un scan instantané sans lag.
+ * 3. Distance Euclidienne : La ressemblance faciale est vérifiée via la comparaison des vecteurs.
+ */
 import { useRef, useState, useEffect, useCallback } from 'react';
 import api from '../services/api';
 import { Camera, X, Loader2, UserCheck, ShieldCheck, AlertCircle, Zap } from 'lucide-react';
 import * as faceapi from 'face-api.js';
 import { useToast } from './ui/toast';
 
-// ─── Types ────────────────────────────────────────────────────────────────────
+// Profil facial contenant le nom, le rôle et les descripteurs faciaux enregistrés
 interface FaceProfile {
     id: number;
     username: string;
     role: string;
     name: string;
-    descriptors: number[][];
+    descriptors: number[][]; // Tableau de vecteurs de 128 dimensions pour chaque visage enregistré
 }
 
 interface FaceLoginProps {
@@ -256,7 +266,6 @@ export const FaceLogin = ({ onSuccess }: FaceLoginProps) => {
                     // Resume scanning after a brief pause
                     hitCount   = 0;
                     lastUserId = null;
-                    hasBlinked = false;
                     lastDesc   = null;
                     done       = false;
                     setTimeout(scan, 1200);

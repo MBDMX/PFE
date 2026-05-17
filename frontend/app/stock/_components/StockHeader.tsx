@@ -36,8 +36,8 @@ export default function StockHeader({ userRole }: Props) {
                             onClick={async () => {
                                 try {
                                     await gmaoApi.syncStockFromSap();
-                                    await gmaoApi.syncImages(true);
-                                    success('Synchronisation SAP ✅', 'Images (Base64) en cours de téléchargement... ⚙️');
+                                    await gmaoApi.syncImages(false);
+                                    success('Synchronisation SAP ✅', 'Téléchargement et hébergement local des images manquantes... ⚙️');
                                     let polls = 0;
                                     const poll = setInterval(async () => {
                                         try {

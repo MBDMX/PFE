@@ -71,8 +71,10 @@ export const SmartPartImage: React.FC<SmartPartImageProps> = ({
 
     const load = async () => {
       // 1. On essaie d'abord l'image initiale passée en props
-      if (initialImage && (initialImage.startsWith('http') || initialImage.includes('/static/'))) {
-        const fullUrl = initialImage.startsWith('http') ? initialImage : `${API_BASE_URL}${initialImage}`;
+      if (initialImage && (initialImage.startsWith('http') || initialImage.includes('/static/') || initialImage.startsWith('data:image'))) {
+        const fullUrl = (initialImage.startsWith('http') || initialImage.startsWith('data:image'))
+          ? initialImage
+          : `${API_BASE_URL}${initialImage}`;
         setImgSrc(fullUrl);
         setIsLoading(false);
         return;
@@ -81,8 +83,10 @@ export const SmartPartImage: React.FC<SmartPartImageProps> = ({
       // 2. On vérifie le cache local Dexie
       try {
         const cached = await db.stock.get({ id: partId });
-        if (cached?.image && (cached.image.startsWith('http') || cached.image.includes('/static/'))) {
-          const url = cached.image.startsWith('http') ? cached.image : `${API_BASE_URL}${cached.image}`;
+        if (cached?.image && (cached.image.startsWith('http') || cached.image.includes('/static/') || cached.image.startsWith('data:image'))) {
+          const url = (cached.image.startsWith('http') || cached.image.startsWith('data:image'))
+            ? cached.image
+            : `${API_BASE_URL}${cached.image}`;
           setImgSrc(url);
           setIsLoading(false);
           return;

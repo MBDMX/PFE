@@ -9,6 +9,19 @@ from app.core.config import settings
 
 router = APIRouter()
 
+def map_user_to_dict(user) -> dict:
+    return {
+        "id":          user.id,
+        "username":    user.username,
+        "email":       user.email or "",
+        "role":        user.role,
+        "name":        user.name or "",
+        "manager_id":  user.manager_id,
+        "team":        user.team,
+        "is_active":   getattr(user, "is_active", True),
+        "permissions": getattr(user, "permissions", "{}")
+    }
+
 def make_token_data(user) -> dict:
     """Single source of truth for JWT payload — always includes id, sub, role, name."""
     return {
@@ -36,10 +49,10 @@ async def login(u: UserLogin, db: Prisma = Depends(get_db)):
             detail="Mot de passe incorrect"
         )
     
-    if not user.is_active:
+    if not getattr(user, "is_active", True):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Votre compte a été désactivé par un administrateur."
+            detail="Votre compte a été désactivé. Veuillez contacter l'administrateur."
         )
 
     data          = make_token_data(user)
@@ -50,7 +63,7 @@ async def login(u: UserLogin, db: Prisma = Depends(get_db)):
         "access_token":  access_token,
         "refresh_token": refresh_token,
         "token_type":    "bearer",
-        "user":          user,
+        "user":          map_user_to_dict(user),
     }
 
 @router.post("/register", response_model=UserOut)
@@ -70,7 +83,7 @@ async def register(u: UserCreate, db: Prisma = Depends(get_db)):
         "role":          u.role,
         "name":          u.name,
     })
-    return db_user
+    return map_user_to_dict(db_user)
 
 @router.post("/refresh", response_model=Token)
 async def refresh_token(req: TokenRefreshRequest, db: Prisma = Depends(get_db)):
@@ -94,9 +107,10 @@ async def refresh_token(req: TokenRefreshRequest, db: Prisma = Depends(get_db)):
         "access_token":  new_access,
         "refresh_token": new_refresh,
         "token_type":    "bearer",
-        "user":          user,
+        "user":          map_user_to_dict(user),
     }
 
 @router.get("/me", response_model=UserOut)
 async def get_me(current_user=Depends(get_current_user)):
-    return current_user
+    return map_user_to_dict(current_user)
+

@@ -1,13 +1,14 @@
-'use client';
+'use client'; // Indique à Next.js que ce fichier s'exécute côté navigateur (composant dynamique interactif)
 
-import { useState, useEffect, useRef } from 'react';
-import { useRouter } from 'next/navigation';
-import { User, Lock, Wrench, ArrowRight, Eye, EyeOff } from 'lucide-react';
+import { useState, useEffect, useRef } from 'react'; // Gestion des états React et cycle de vie
+import { useRouter } from 'next/navigation'; // Outil de routage de Next.js
+import { User, Lock, Wrench, ArrowRight, Eye, EyeOff } from 'lucide-react'; // Icônes de sécurité et de maintenance
 import api from '@/services/api';
-import { FaceLogin } from '@/components/FaceLogin';
-import { FaceEnroll } from '@/components/FaceEnroll';
+import { FaceLogin } from '@/components/FaceLogin'; // Authentification biométrique par reconnaissance faciale
+import { FaceEnroll } from '@/components/FaceEnroll'; // Enregistrement obligatoire du visage si absent
 
-// Role → dashboard route map (read-only, never user-controlled)
+// 🗺️ DICTIONNAIRE DE REDIRECTION DES RÔLES :
+// Associe chaque rôle à son interface/dashboard correspondant pour des raisons de sécurité
 const ROLE_ROUTES: Record<string, string> = {
   admin: '/dashboard/admin',
   technician: '/dashboard/technician',
@@ -16,21 +17,22 @@ const ROLE_ROUTES: Record<string, string> = {
 };
 
 export default function LoginPage() {
-  const [username, setUsername] = useState('');
-  const [password, setPassword] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
-  const [error, setError] = useState('');
-  const [loading, setLoading] = useState(false);
+  const [username, setUsername] = useState(''); // Nom d'utilisateur saisi
+  const [password, setPassword] = useState(''); // Mot de passe saisi
+  const [showPassword, setShowPassword] = useState(false); // Cache/Affiche le mot de passe
+  const [error, setError] = useState(''); // Message d'erreur
+  const [loading, setLoading] = useState(false); // Spinner de chargement actif
 
   const router = useRouter();
-  const usernameRef = useRef<HTMLInputElement>(null);
+  const usernameRef = useRef<HTMLInputElement>(null); // Pointeur pour forcer le focus du clavier sur l'identifiant
 
-  // Redirect if already authenticated
+  // 📡 AUTO-REDIRECT SI DÉJÀ CONNECTÉ (Vérification du cache JWT)
   useEffect(() => {
     usernameRef.current?.focus();
     const token = localStorage.getItem('token');
     if (!token) return;
     try {
+      // Décode le payload du jeton JWT pour rediriger directement l'utilisateur
       const payload = JSON.parse(
         window.atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))
       );
@@ -39,36 +41,38 @@ export default function LoginPage() {
     } catch { }
   }, []);
 
-  const ready = username.trim().length > 0 && password.length > 0;
+  const ready = username.trim().length > 0 && password.length > 0; // Vrai si les deux champs sont saisis
 
-  const [showEnrollment, setShowEnrollment] = useState(false);
+  const [showEnrollment, setShowEnrollment] = useState(false); // Affiche la popup d'enrôlement Face ID obligatoire
 
+  // 🔐 ACTION : ESSAI DE CONNEXION CLASSIQUE (Identifiant/Mot de passe)
   async function handleLogin() {
     if (!ready || loading) return;
     setLoading(true);
     setError('');
     try {
+      // Requête HTTP POST vers FastAPI /auth/login
       const res = await api.post('/auth/login', { identifier: username, password });
       const { access_token, refresh_token, user } = res.data;
 
-      // Store tokens and user info
+      // Stockage sécurisé des jetons JWT locaux dans le navigateur (localStorage)
       localStorage.setItem('token', access_token);
       if (refresh_token) localStorage.setItem('refresh_token', refresh_token);
       localStorage.setItem('user', JSON.stringify(user));
 
-      // ─── MANDATORY FACE ENROLLMENT CHECK ───
-      // If the user has no face profile, we force enrollment now
+      // ─── 📸 DOUBLE FACTEUR BIOMÉTRIQUE OBLIGATOIRE (MANDATORY FACE ENROLLMENT CHECK) ───
+      // Si l'utilisateur n'a pas encore enregistré sa photo/visage (Face ID), on bloque
+      // et on lui impose de s'enrôler pour sécuriser son compte !
       if (!user.has_face_id) {
         setShowEnrollment(true);
-        return; // Don't redirect yet
+        return; // Stoppe la redirection
       }
 
-      // If they have a face, redirect normally
+      // Si le visage existe, redirection vers son dashboard dédié
       const route = ROLE_ROUTES[user.role];
       if (!route) throw new Error('Rôle inconnu');
       
-      // Use window.location.href for a clean "solid base" redirect
-      window.location.href = route;
+      window.location.href = route; // Redirection physique propre
     } catch (err: any) {
       let msg = err.response?.data?.detail;
       if (Array.isArray(msg)) msg = msg[0]?.msg;
@@ -88,17 +92,17 @@ export default function LoginPage() {
       className="relative min-h-screen w-full flex flex-col justify-center items-center overflow-hidden bg-[#0f172a]"
       style={{ fontFamily: 'var(--font-outfit), sans-serif' }}
     >
-      {/* Ambient glows */}
+      {/* Halos de lumière décoratifs en arrière-plan */}
       <div className="absolute top-[-10%] left-[-5%] w-[70%] h-[60%] bg-blue-500/10 rounded-full blur-[120px] animate-pulse pointer-events-none" />
       <div className="absolute bottom-[-10%] right-[-5%] w-[60%] h-[50%] bg-blue-400/10 rounded-full blur-[100px] animate-pulse pointer-events-none" style={{ animationDelay: '3s' }} />
 
-      {/* Card */}
+      {/* Carte principale de connexion */}
       <div className="relative z-10 w-full max-w-[90%] sm:max-w-[480px] p-8 sm:p-12
                       bg-[#112240] rounded-[2rem]
                       border-2 border-white/90
                       shadow-[0_40px_100px_-20px_rgba(0,0,0,0.6)]">
 
-        {/* Header */}
+        {/* LOGO ET TITRE DE L'APPLICATION */}
         <div className="text-center mb-10">
           <div className="inline-flex relative mb-6">
             <div className="absolute inset-0 bg-blue-500/30 blur-3xl rounded-full" />
@@ -114,13 +118,13 @@ export default function LoginPage() {
           </p>
         </div>
 
-        {/* Form */}
+        {/* Formulaire interactif */}
         <form 
           onSubmit={(e) => { e.preventDefault(); handleLogin(); }}
           className="space-y-5"
         >
 
-          {/* Username */}
+          {/* Saisie de l'identifiant */}
           <div className="group relative">
             <input
               ref={usernameRef}
@@ -130,12 +134,11 @@ export default function LoginPage() {
               className="w-full pl-6 pr-14 py-4 sm:py-5 bg-white/5 border border-white/10 rounded-2xl outline-none focus:border-blue-300/60 focus:bg-white/10 transition-all font-medium text-white placeholder-white/40 text-sm sm:text-base"
               value={username}
               onChange={e => { setUsername(e.target.value); setError(''); }}
-              onKeyDown={e => e.key === 'Enter' && usernameRef.current?.nextElementSibling && (usernameRef.current.nextElementSibling as HTMLElement)?.focus?.()}
             />
             <User size={18} className="absolute right-5 top-1/2 -translate-y-1/2 text-white/40 group-focus-within:text-blue-300 transition-colors pointer-events-none" />
           </div>
 
-          {/* Password */}
+          {/* Saisie du mot de passe avec œil d'affichage/masquage */}
           <div className="group relative">
             <input
               type={showPassword ? 'text' : 'password'}
@@ -156,7 +159,7 @@ export default function LoginPage() {
             </button>
           </div>
 
-          {/* Forgot password */}
+          {/* Mot de passe oublié */}
           <div className="flex justify-end">
             <button
               type="button"
@@ -167,14 +170,14 @@ export default function LoginPage() {
             </button>
           </div>
 
-          {/* Error */}
+          {/* Affichage des messages d'erreurs en rouge */}
           {error && (
             <div className="bg-red-500/10 text-red-300 px-4 py-3 rounded-2xl text-center text-[10px] font-black tracking-widest uppercase border border-red-500/20 animate-in fade-in duration-300">
               {error}
             </div>
           )}
 
-          {/* Submit */}
+          {/* Bouton de validation de connexion */}
           <div className="relative pt-2">
             <div className={`absolute inset-0 bg-blue-400/30 blur-2xl rounded-full scale-90 transition-opacity duration-700 ${ready ? 'opacity-100' : 'opacity-0'}`} />
             <button
@@ -200,7 +203,7 @@ export default function LoginPage() {
             </button>
           </div>
 
-          {/* Biometric Login */}
+          {/* Section biométrique alternative (Face ID) */}
           <div className="pt-4 space-y-4">
             <div className="flex items-center gap-4 py-2">
               <div className="h-[1px] flex-1 bg-white/5" />
@@ -208,10 +211,9 @@ export default function LoginPage() {
               <div className="h-[1px] flex-1 bg-white/5" />
             </div>
 
+            {/* Composant de reconnaissance faciale en direct (FaceLogin) */}
             <FaceLogin 
               onSuccess={(user) => {
-                // FaceLogin already stored token + user in localStorage.
-                // Use router.replace for instant navigation (no full page reload).
                 const role  = user?.role ?? JSON.parse(localStorage.getItem('user') || '{}').role;
                 const route = ROLE_ROUTES[role] ?? '/dashboard/technician';
                 router.replace(route);
@@ -222,11 +224,11 @@ export default function LoginPage() {
         </form>
       </div>
 
-      {/* Mandatory Face Enrollment Overlay */}
+      {/* ─── FENÊTRE DE SÉCURITÉ DE DOUBLE FACTEUR BIOMÉTRIQUE FORCE ENROLLMENT OVERLAY ─── */}
       {showEnrollment && (
         <div className="fixed inset-0 z-[1000] flex flex-col items-center justify-center bg-slate-950/95 backdrop-blur-3xl animate-in fade-in duration-700 p-4">
           <div className="w-full max-w-2xl bg-[#112240] rounded-[3rem] border border-white/10 p-8 shadow-2xl overflow-hidden relative">
-            <FaceEnroll />
+            <FaceEnroll /> {/* Enregistre le visage avec la webcam */}
             
             <div className="mt-4 flex justify-center border-t border-white/5 pt-6">
               <button 

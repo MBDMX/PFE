@@ -1,0 +1,16 @@
+[DESCRIPTORS] Served 3 profile(s)
+[DESCRIPTORS] Served 3 profile(s)
+[DESCRIPTORS] Served 3 profile(s)
+[FACE TOKEN] Re-verify resp1: dist=0.3481
+[FACE TOKEN] OK — issuing tokens for resp1
+[DESCRIPTORS] Served 3 profile(s)
+[DESCRIPTORS] Served 3 profile(s)
+[DESCRIPTORS] Served 3 profile(s)
+[DESCRIPTORS] Served 3 profile(s)
+[FACE TOKEN] Re-verify resp1: dist=0.3791
+[FACE TOKEN] OK — issuing tokens for resp1
+[DESCRIPTORS] Served 3 profile(s)
+[DESCRIPTORS] Served 3 profile(s)
+[DESCRIPTORS] Served 3 profile(s)
+[DESCRIPTORS] Served 3 profile(s)
+[DESCRIPTORS] Served 3 profile(s)

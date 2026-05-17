@@ -140,50 +140,85 @@ async def order_stock(data: dict, db: Prisma = Depends(get_db)):
     qty = data.get("quantity", 1)
     return {"status": "success", "message": f"Commande de {qty} unité(s) transmise à SAP"}
 
+import os
+
+def save_b64_to_disk(b64_data: str, part_id: int) -> Optional[str]:
+    """Décode l'image Base64 issue de SerpApi et la sauvegarde sous static/parts/part_{part_id}.jpg"""
+    try:
+        if not b64_data or not b64_data.startswith("data:image"):
+            return None
+        header, base64_str = b64_data.split(",", 1)
+        import base64 as py_base64
+        img_bytes = py_base64.b64decode(base64_str)
+        
+        os.makedirs("static/parts", exist_ok=True)
+        filepath = f"static/parts/part_{part_id}.jpg"
+        with open(filepath, "wb") as f:
+            f.write(img_bytes)
+        return f"/static/parts/part_{part_id}.jpg"
+    except Exception as e:
+        print(f"❌ Error saving base64 image to disk: {e}")
+        return None
+
 _bg_running = False  # Verrou global pour éviter les doubles exécutions
 
 async def _bg_download_all_images(force: bool = False):
-    """Tâche de fond : télécharge les images Wikimedia (base64)."""
+    """
+    Tâche de fond : parcourt les pièces sans image et récupère le Base64 via SerpApi.
+    Sauvegarde ensuite l'image localement pour un hébergement permanent et ultra-rapide.
+    """
     global _bg_running
-    if _bg_running:
-        print("⏳ [BG] Téléchargement déjà en cours, on ignore.")
-        return
+    if _bg_running: return
     _bg_running = True
-    print(f"🖼️ [BG] Démarrage du téléchargement Wikimedia (Base64) - Force={force}...")
+    import asyncio
+    db = Prisma()
+    await db.connect()
     try:
-        # Récupère les pièces (toutes si force, sinon seulement celles sans image)
-        where_clause = {} if force else {"OR": [{"image": None}, {"image": ""}]}
-        all_parts = await prisma.stock.find_many(
-            where=where_clause,
-            order={"id": "asc"}
-        )
-        total = len(all_parts)
-        print(f"   🔍 {total} images à traiter...")
+        # On ne prend que les pièces qui n'ont pas d'image (sauf si force=True)
+        where = {} if force else {"image": None}
+        parts = await db.stock.find_many(where=where)
+        total = len(parts)
         
-        done = 0
-        for part in all_parts:
-            # Safe access to category (prevents crash if DB migration is pending)
-            cat = getattr(part, 'category', None)
-            b64_data = await get_part_image_b64(part.name or "industrial part", cat)
-            if b64_data:
-                await prisma.stock.update(
-                    where={"id": part.id},
-                    data={"image": b64_data}
-                )
-            done += 1
-            if done % 5 == 0 or done == total:
-                print(f"   ✅ [{done}/{total}] Images traitées")
+        if total == 0:
+            print("✅ [BG] Toutes les images sont déjà là ou aucune pièce à traiter.")
+            return
+
+        print(f"🚀 [BG] Début synchro SerpApi pour {total} pièces...")
+        
+        # On traite par petits lots pour ne pas saturer l'API ou la mémoire
+        batch_size = 5
+        for i in range(0, total, batch_size):
+            batch = parts[i:i+batch_size]
+            tasks = []
+            for p in batch:
+                tasks.append(get_part_image_b64(p.name or "", p.category))
+            
+            # Exécution parallèle du lot
+            results = await asyncio.gather(*tasks)
+            
+            # Sauvegarde directe en base de données et sur disque
+            for idx, b64_data in enumerate(results):
+                if b64_data:
+                    part_id = batch[idx].id
+                    local_url = save_b64_to_disk(b64_data, part_id)
+                    if local_url:
+                        await db.stock.update(
+                            where={"id": part_id},
+                            data={"image": local_url, "image_verified": True}
+                        )
+            
+            print(f"   ✅ [{min(i + len(batch), total)}/{total}] Images synchronisées")
                 
     except Exception as e:
         print(f"❌ [BG] Erreur: {e}")
     finally:
         _bg_running = False
-        print("✅ [BG] Session SerpApi (Google Images) terminée.")
+        print("✅ [BG] Session SerpApi terminée.")
 
 
 @router.post("/{part_id}/fetch-image")
 async def fetch_image_for_part(part_id: int, force: bool = False, db: Prisma = Depends(get_db)):
-    """Force le téléchargement de l'image pour une pièce spécifique."""
+    """Force le téléchargement de l'image pour une pièce spécifique via SerpApi et la stocke sur disque."""
     part = await db.stock.find_unique(where={"id": part_id})
     if not part:
         raise HTTPException(status_code=404, detail="Pièce introuvable")
@@ -195,10 +230,15 @@ async def fetch_image_for_part(part_id: int, force: bool = False, db: Prisma = D
     cat = getattr(part, 'category', None)
     b64_data = await get_part_image_b64(part.name or "industrial part", cat)
     if b64_data:
-        await db.stock.update(where={"id": part_id}, data={"image": b64_data})
-        return {"status": "success", "message": "Image mise à jour"}
+        local_url = save_b64_to_disk(b64_data, part_id)
+        if local_url:
+            await db.stock.update(
+                where={"id": part_id},
+                data={"image": local_url, "image_verified": True}
+            )
+            return {"status": "success", "message": "Image mise à jour", "image": local_url}
     
-    raise HTTPException(status_code=404, detail="Aucune image trouvée sur Wikimedia")
+    raise HTTPException(status_code=404, detail="Aucune image de qualité trouvée")
 
 
 @router.patch("/{part_id}/verify")
@@ -223,113 +263,83 @@ async def sync_stock_images(background_tasks: BackgroundTasks, force: bool = Fal
     return {"status": "started", "message": f"Téléchargement de {total} images lancé en arrière-plan (Force={force})."}
 
 
-@router.post("/sync-from-sap")
-async def sync_stock_from_sap(background_tasks: BackgroundTasks, db: Prisma = Depends(get_db)):
-    """Importe les articles SAP et vide les anciennes données de démo/queue."""
-    # 🧹 Nettoyage complet avant synchro
-    await db.stockmovement.delete_many()
-    await db.stock.delete_many()
-    
+async def _bg_sync_sap_logic(db: Prisma):
+    """Logique lourde exécutée en tâche de fond pour éviter les timeouts."""
     items = []
-    source = "SAP"
     try:
         if sap_client.login_sl():
-            items = sap_client.get_items(top=200)
-        else:
-            print("⚠️ SAP injoignable, mode DEMO.")
-    except Exception as e:
-        print(f"⚠️ SAP hors-ligne, mode DEMO : {e}")
-
-    if not items:
-        source = "DEMO"
-        # On ne met plus d'articles de démo, on laisse vide ou on affiche une erreur
-        items = []
-        print("⚠️ Aucun article trouvé (SAP vide ou démo désactivée).")
-
-    count = 0
-    try:
-        for it in items:
-            ref = it.get("ItemCode")
-            if not ref:
-                continue
-            name = it.get("ItemName", "Article")
-            
-            # 💰 Prix : Priorité SAP (ItemPrices), sinon Demo (SalesUnitHeight)
-            price = 0.0
-            if "ItemPrices" in it:
-                for p in it.get("ItemPrices", []):
-                    if p.get("Price") and float(p.get("Price")) > 0:
-                        price = float(p.get("Price"))
-                        break
-            else:
-                price = float(it.get("SalesUnitHeight") or 0.0)
-            
-            # 📦 Stock : Priorité SAP (QuantityOnStock), sinon Demo (fixe à 15)
-            if "QuantityOnStock" in it:
+            items = sap_client.get_items(top=1000)
+        
+        if items:
+            # On n'efface plus tout pour préserver les images et l'historique de mouvements !
+            sap_references = []
+            for it in items:
+                ref = it.get("ItemCode")
+                if not ref: continue
+                sap_references.append(ref)
+                name = it.get("ItemName", "Article")
+                price = float(it.get("ItemPrices", [{}])[0].get("Price") or it.get("SalesUnitHeight") or 0.0)
                 stock_qty = float(it.get("QuantityOnStock") or 0.0)
-            else:
-                stock_qty = 15.0 # Valeur par défaut pour la démo
+                category = str(it.get("ItemsGroupCode") or "Pièce Industrielle")
 
-            # Upsert items
-            await db.stock.upsert(
-                where={"reference": ref},
-                data={
-                    "create": {
-                        "reference": ref, 
-                        "name": name, 
-                        "quantity": int(stock_qty), 
-                        "unit_price": price, 
-                        "image": None
-                    },
-                    "update": {
-                        "name": name, 
-                        "unit_price": price,
-                        "quantity": int(stock_qty)
+                await db.stock.upsert(
+                    where={"reference": ref},
+                    data={
+                        "create": {"reference": ref, "name": name, "quantity": int(stock_qty), "unit_price": price, "category": category},
+                        "update": {"name": name, "unit_price": price, "category": category, "quantity": int(stock_qty)}
                     }
-                }
-            )
-            count += 1
+                )
+            
+            # Optionnel : Supprimer uniquement les pièces locales qui ont été retirées de SAP
+            all_local_parts = await db.stock.find_many()
+            for p in all_local_parts:
+                if p.reference not in sap_references:
+                    try:
+                        await db.stock.delete(where={"id": p.id})
+                    except Exception:
+                        pass
 
-        # ✅ Répond immédiatement à l'utilisateur, images chargées en fond
-        background_tasks.add_task(_bg_download_all_images)
-        print(f"✅ [{source}] {count} articles synchronisés. Images en cours...")
-
-        return {
-            "status": "success",
-            "source": source,
-            "message": f"{count} articles synchronisés. Images en cours de téléchargement ⚙️"
-        }
+            print(f"✅ [BG] {len(items)} articles SAP importés/mis à jour avec succès.")
+            # On lance le téléchargement des images manquantes
+            await _bg_download_all_images(force=False)
     except Exception as e:
-        print(f"❌ Erreur sync : {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        print(f"❌ [BG] Erreur synchro SAP: {e}")
 
+@router.post("/sync-from-sap")
+async def sync_stock_from_sap(background_tasks: BackgroundTasks, db: Prisma = Depends(get_db)):
+    """Lance la synchronisation en arrière-plan et répond immédiatement."""
+    background_tasks.add_task(_bg_sync_sap_logic, db)
+    return {
+        "status": "success",
+        "message": "Synchronisation SAP lancée en arrière-plan. Les articles apparaîtront dans quelques instants."
+    }
 
 @router.get("", response_model=List[StockSchema])
 async def get_stock(db: Prisma = Depends(get_db)):
-    items = await db.stock.find_many()
-    # On s'assure que les liens locaux sont complets pour le frontend
-    for item in items:
-        if item.image and item.image.startswith("/static/"):
-            item.image = f"http://localhost:5000{item.image}"
+    """Retourne tous les articles du stock avec leurs images Base64."""
+    items = await db.stock.find_many(order={"name": "asc"})
     return items
 
 @router.post("/{part_id}/ensure-image")
 async def ensure_part_image(part_id: int, force: bool = False, db: Prisma = Depends(get_db)):
-    """Déclenche le téléchargement d'une image si elle manque."""
+    """Déclenche le téléchargement d'une image si elle manque (SerpApi Only)."""
     part = await db.stock.find_unique(where={"id": part_id})
     if not part:
         raise HTTPException(status_code=404, detail="Pièce non trouvée")
     
-    # On force la génération/téléchargement asynchrone
-    from app.core.image_service import get_image_url_for_part
-    new_path = await get_image_url_for_part(part.name or "", str(part_id), force)
-    
-    if new_path:
-        await db.stock.update(where={"id": part_id}, data={"image": new_path})
-        full_url = f"http://localhost:5000{new_path}" if new_path.startswith("/static/") else new_path
-        return {"status": "success", "image": full_url}
-    
-    return {"status": "error", "message": "Échec du téléchargement"}
+    # Appel SerpApi (Haute qualité Google Images)
+    cat = getattr(part, 'category', None)
+    b64_data = await get_part_image_b64(part.name or "", cat)
+    if b64_data:
+        local_url = save_b64_to_disk(b64_data, part_id)
+        if local_url:
+            await db.stock.update(where={"id": part_id}, data={"image": local_url, "image_verified": True})
+            full_url = f"http://127.0.0.1:5000{local_url}"
+            return {"status": "success", "image": full_url}
+            
+    return {"status": "error", "message": "Aucune image trouvée ou erreur SerpApi"}
+
+
 
 @router.post("/search-ai")
 async def search_stock_ai(data: dict, db: Prisma = Depends(get_db)):
@@ -349,6 +359,37 @@ async def search_stock_ai(data: dict, db: Prisma = Depends(get_db)):
         }
         for r in results
     ]
+
+@router.post("/clear-images")
+@router.get("/clear-images")
+async def clear_all_parts_images(db: Prisma = Depends(get_db)):
+    """Supprime physiquement toutes les images du stock sur le disque et réinitialise la base de données."""
+    import glob
+    import os
+    try:
+        # 1. Réinitialiser la base de données
+        await db.stock.update_many(
+            where={},
+            data={"image": None, "image_verified": False}
+        )
+        
+        # 2. Supprimer tous les fichiers physiques dans static/parts/
+        files = glob.glob("static/parts/*.jpg")
+        deleted_count = 0
+        for f in files:
+            try:
+                os.remove(f)
+                deleted_count += 1
+            except Exception as e:
+                print(f"Error removing file {f}: {e}")
+                
+        return {
+            "status": "success",
+            "message": f"Base de données réinitialisée et {deleted_count} fichiers d'images physiques supprimés de static/parts/."
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erreur lors de la suppression des images: {e}")
+
 
 # PARTS REQUESTS MANAGEMENT
 pr_router = APIRouter(prefix="/parts-requests", tags=["parts-requests"])

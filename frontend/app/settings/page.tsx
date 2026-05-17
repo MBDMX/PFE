@@ -1,13 +1,16 @@
-'use client';
-import { useEffect, useState } from 'react';
-import { Loader2, Settings as SettingsIcon } from 'lucide-react';
+'use client'; // Indique à Next.js que ce fichier s'exécute côté navigateur (composant dynamique interactif)
+
+import { useEffect, useState } from 'react'; // Gestion des états React et cycle de vie
+import { Loader2, Settings as SettingsIcon } from 'lucide-react'; // Icônes de chargement et de rouage
 import { getCurrentUser } from './_components/types';
 
-// Lazy imports to avoid loading all role pages at once
+// 🚀 IMPORTATION PARESSEUSE DYNAMIQUE (Lazy Loading next/dynamic) :
+// Permet de ne charger le code des paramètres spécifiques qu'au moment où l'utilisateur en a besoin,
+// évitant de charger des composants Admin/Manager lourds pour un simple technicien connecté.
 import dynamic from 'next/dynamic';
 
 const AdminSettings      = dynamic(() => import('./_components/AdminSettings'),      { 
-    ssr: false,
+    ssr: false, // Désactive le rendu côté serveur (Server Side Rendering) car on lit du localStorage
     loading: () => <div className="flex h-[50vh] items-center justify-center"><Loader2 className="animate-spin text-slate-500" /></div>
 });
 const ManagerSettings    = dynamic(() => import('./_components/ManagerSettings'),    { 
@@ -24,17 +27,19 @@ const MagasinierSettings = dynamic(() => import('./_components/MagasinierSetting
 });
 
 export default function SettingsPage() {
-    const [role, setRole] = useState<string | null>(null);
-    const [loading, setLoading] = useState(true);
+    const [role, setRole] = useState<string | null>(null); // Stocke le rôle décodé de l'utilisateur
+    const [loading, setLoading] = useState(true); // Statut de chargement initial
 
+    // 📡 RÉCUPÉRATION DU RÔLE AU MONTAGE DU COMPOSANT
     useEffect(() => {
-        const user = getCurrentUser();
+        const user = getCurrentUser(); // Récupère l'utilisateur depuis le jeton JWT
         if (user) {
-            setRole(user.role);
+            setRole(user.role); // Renseigne le rôle
         }
         setLoading(false);
     }, []);
 
+    // 1. ÉCRAN DE CHARGEMENT INITIAL (Spinner tournant bleu)
     if (loading) {
         return (
             <div className="flex h-[70vh] items-center justify-center">
@@ -43,6 +48,7 @@ export default function SettingsPage() {
         );
     }
 
+    // 2. CAS D'ACCÈS NON AUTORISÉ (Si l'utilisateur n'est pas connecté ou n'a pas de session)
     if (!role) {
         return (
             <div className="min-h-[70vh] flex flex-col items-center justify-center p-8 text-center">
@@ -57,6 +63,7 @@ export default function SettingsPage() {
         );
     }
 
+    // 3. AFFICHAGE DU COMPOSANT DÉDIÉ SELON LE RÔLE DÉTECTÉ (Admin, Manager, Magasinier ou Technicien)
     return (
         <div className="max-w-6xl mx-auto px-4 py-8 animate-in fade-in duration-500">
             {role === 'admin' && <AdminSettings />}
@@ -64,7 +71,7 @@ export default function SettingsPage() {
             {role === 'magasinier' && <MagasinierSettings />}
             {role === 'technician' && <TechnicianSettings />}
             
-            {/* Fallback for unknown roles */}
+            {/* Cas de secours (fallback) pour les rôles inconnus ou mal formés */}
             {!['admin', 'manager', 'magasinier', 'technician'].includes(role) && <TechnicianSettings />}
         </div>
     );

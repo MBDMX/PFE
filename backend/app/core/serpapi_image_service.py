@@ -11,14 +11,17 @@ import unicodedata
 from io import BytesIO
 from typing import Optional
 
+# pyrefly: ignore [missing-import]
 import httpx
+# pyrefly: ignore [missing-import]
 from PIL import Image
+# pyrefly: ignore [missing-import]
 from serpapi import GoogleSearch
 
 logger = logging.getLogger(__name__)
 
-# Ta clé SerpApi
-SERPAPI_KEY = "2139cff42c62bc28a7551ba18958610ea66636c1e6156a08e27bd21c251dc843"
+# Ta clé SerpApi (récupérée depuis le .env)
+SERPAPI_KEY = os.getenv("SERPAPI_KEY", "")
 
 _FR_TO_EN: list[tuple[str, str]] = [
     ("vis à métaux",          "machine screw"),
@@ -96,48 +99,78 @@ async def _download_and_resize(url: str) -> Optional[bytes]:
 
 async def get_part_image_b64(part_name: str, category: Optional[str] = None) -> Optional[str]:
     """
-    Main entry point using SerpApi (Google Images).
+    Main entry point using SerpApi (Google Images) with multi-stage fallback.
     """
+    # Dictionnaire de boosts par catégorie (FR → termes de recherche EN précis)
+    category_boosts = {
+        "moteur":       "engine component",
+        "électrique":   "automotive electrical",
+        "filtration":   "filter automotive",
+        "étanchéité":   "gasket seal",
+        "visserie":     "bolt fastener",
+        "transmission": "gearbox transmission",
+        "freinage":     "brake component",
+        "suspension":   "suspension part",
+        "pompe":        "industrial pump",
+        "roulement":    "ball bearing",
+        "courroie":     "drive belt",
+        "vanne":        "industrial valve",
+    }
+    
+    # On cherche le boost le plus adapté à la catégorie de la pièce
+    boost = "mechanical spare part"
+    if category:
+        for key, val in category_boosts.items():
+            if key in (category or "").lower() or key in part_name.lower():
+                boost = val
+                break
+
+    # Nettoyage du nom (on enlève les codes techniques type REF-123)
+    clean_name = re.sub(r'[A-Z0-9]{3,}-\S*', '', part_name).strip()
+    if not clean_name: clean_name = part_name
+
+    en_query = _build_query(clean_name)
+    
+    # Mots-clés négatifs pour éviter les schémas et dessins
+    negative = "-diagram -schema -cartoon -drawing -blueprint"
+    
+    # Stratégie de recherche en 3 étapes pour éviter les résultats vides
+    search_attempts = [
+        f"{en_query} {boost} OEM white background {negative}",  # Précis avec boost catégorie
+        f"{en_query} industrial spare part {negative}",          # Moyen
+        f"{boost} {negative}"                                    # Général (Fallback ultime)
+    ]
+
     try:
-        en_query = _build_query(part_name)
-        
-        # Désambiguïsation sémantique
-        context = category if category else "industrial spare part"
-        
-        # Requête optimisée avec mots-clés négatifs pour éviter le matériel militaire/jouets
-        negative_keywords = "-military -army -soldier -toy -war -vintage"
-        search_query = f"{en_query} {context} product white background {negative_keywords}"
-        
-        logger.info("🔍 [SerpApi Google] Part: %r (Cat: %r) -> Query: %r", part_name, category, search_query)
-
-        params = {
-            "engine": "google_images",
-            "q": search_query,
-            "api_key": SERPAPI_KEY,
-            "num": 5,
-            "ijn": "0",
-            "chips": "q:industrial,online_chip:spare+part" # Force le contexte industriel via Google Chips
-        }
-
-        # On utilise search() de manière synchrone car SerpApi est rapide
-        search = GoogleSearch(params)
-        results = search.get_dict()
-        
-        images = results.get("images_results", [])
-        if not images:
-            logger.warning("   ⚠️ No images found on Google for %r", part_name)
-            return None
-
-        # On essaie les 3 premières images jusqu'à ce qu'un téléchargement réussisse
-        for i in range(min(3, len(images))):
-            img_url = images[i].get("thumbnail") or images[i].get("original")
-            if not img_url: continue
+        for attempt_query in search_attempts:
+            logger.info("🔍 [SerpApi] Trying query: %r", attempt_query)
             
-            logger.info("   ✅ Google Image found: %s", images[i].get("title", "")[:50])
-            img_bytes = await _download_and_resize(img_url)
-            if img_bytes:
-                b64 = base64.b64encode(img_bytes).decode("ascii")
-                return f"data:image/jpeg;base64,{b64}"
+            params = {
+                "engine": "google_images",
+                "q": attempt_query,
+                "api_key": SERPAPI_KEY,
+                "num": 3,
+                "ijn": "0",
+                "tbs": "isz:m"   # Force images de taille moyenne minimum (meilleure qualité)
+            }
+            
+            search = GoogleSearch(params)
+            results = search.get_dict()
+            images = results.get("images_results", [])
+            
+            if images:
+                # On a trouvé quelque chose !
+                for i in range(min(3, len(images))):
+                    img_url = images[i].get("thumbnail") or images[i].get("original")
+                    if not img_url: continue
+                    
+                    logger.info("   ✅ Image found (Query: %s): %s", attempt_query[:20], images[i].get("title", "")[:40])
+                    img_bytes = await _download_and_resize(img_url)
+                    if img_bytes:
+                        b64 = base64.b64encode(img_bytes).decode("ascii")
+                        return f"data:image/jpeg;base64,{b64}"
+            
+            logger.warning("   ⚠️ No results for %r, trying next fallback...", attempt_query)
 
         return None
     except Exception as e:

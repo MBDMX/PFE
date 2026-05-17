@@ -1,41 +1,46 @@
-'use client';
-import { useState, useEffect } from 'react';
+'use client'; // Indique à Next.js que ce fichier s'exécute côté navigateur (composant dynamique interactif)
+
+import { useState, useEffect } from 'react'; // Gestion des états React et cycle de vie
 import {
     CheckCircle, AlertTriangle, Wrench,
     Loader2, Bell, Timer, User
-} from 'lucide-react';
+} from 'lucide-react'; // Icônes vectorielles Lucide
 import { gmaoApi } from '../../../services/api';
 import { useToast } from '../../../components/ui/toast';
 import { WorkOrder, isOverdue } from './_components/types';
-import KPICard from './_components/KPICard';
-import CalendarWidget from './_components/CalendarWidget';
-import Top5Widget from './_components/Top5Widget';
+// Importation des widgets spécifiques du technicien
+import KPICard from './_components/KPICard'; // Petite carte de métriques clés
+import CalendarWidget from './_components/CalendarWidget'; // Calendrier des interventions planifiées
+import Top5Widget from './_components/Top5Widget'; // Top 5 des ordres les plus urgents
 import NotificationCenter from '../../../components/ui/NotificationCenter';
 
-import { useLiveQuery } from 'dexie-react-hooks';
-import { db } from '../../../lib/db';
+import { useLiveQuery } from 'dexie-react-hooks'; // Se déclenche automatiquement si la base local change
+import { db } from '../../../lib/db'; // Base locale IndexedDB du navigateur
 
 export default function TechnicianDashboard() {
-    const [userName, setUserName] = useState('');
-    const [userId, setUserId] = useState('');
+    const [userName, setUserName] = useState(''); // Nom du technicien connecté
+    const [userId, setUserId] = useState(''); // Identifiant du technicien
 
-    // ✅ REACTIVE: Auto-refreshes when IndexedDB changes
+    // 📡 1. LECTURE DE LA BASE LOCAL INDEXEDDB (Dexie)
+    // Rend le tableau de bord ultra-rapide (PWA offline ready)
     const workOrders = useLiveQuery(() => db.workOrders.toArray()) || [];
     const isLoading = useLiveQuery(() => db.workOrders.count()) === undefined;
-    const [notifCount, setNotifCount] = useState(0);
-    const [techKpis, setTechKpis] = useState<any>(null);
+    const [notifCount, setNotifCount] = useState(0); // Nombre de notifications de pièces validées
+    const [techKpis, setTechKpis] = useState<any>(null); // Indicateurs de performance du technicien (KPIs backend)
 
     useEffect(() => {
         const fetchCount = () => {
             const token = localStorage.getItem('token');
             if (token) {
+                // Requête HTTP GET vers FastAPI pour compter les notifications non lues
                 gmaoApi.get('/parts-requests/pending-count')
                     .then(d => { if (d.count !== undefined) setNotifCount(d.count); })
                     .catch(() => { });
             }
         };
         
-        // 🔥 REACTIVE: Listen to global notification events from WebSocket
+        // 🔔 2. ÉCOUTeur D'ÉVÉNEMENTS WEBSOCKET EN DIRECT (Temps Réel)
+        // Permet d'incrémenter le badge rouge de notification instantanément sans rafraîchir la page
         const handleNewNotif = () => setNotifCount(prev => prev + 1);
         window.addEventListener('gmao:notification', handleNewNotif);
         
@@ -43,11 +48,13 @@ export default function TechnicianDashboard() {
         return () => window.removeEventListener('gmao:notification', handleNewNotif);
     }, []);
 
+    // 🔐 3. DÉCODAGE DU JETON JWT ET CHARGEMENT DES COMPTEURS MÈTIERS
     useEffect(() => {
         if (typeof window !== 'undefined') {
             const token = localStorage.getItem('token');
             if (token) {
                 try {
+                    // Récupération des infos cryptées dans la charge utile (payload) du jeton JWT
                     const payload = JSON.parse(
                         window.atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))
                     );
@@ -56,10 +63,10 @@ export default function TechnicianDashboard() {
                 } catch { }
             }
         }
-        // Background sync
+        // Lancement en arrière-plan du rafraîchissement des ordres de travail
         gmaoApi.getWorkOrders().catch(() => { });
 
-        // Fetch backend KPIs for the technician
+        // Appel de l'API FastAPI pour charger les KPI de réactivité du technicien
         if (typeof window !== 'undefined') {
             const token = localStorage.getItem('token');
             if (token) {
@@ -76,12 +83,13 @@ export default function TechnicianDashboard() {
         }
     }, []);
 
-    // ── KPIs ──
+    // 📊 4. STATISTIQUES RÉACTIVES EN LOCAL
     const total = workOrders.length;
     const finished = workOrders.filter(o => o.status === 'done' || o.status === 'closed').length;
     const resolutionRate = total > 0 ? Math.round((finished / total) * 100) : 0;
-    const overdueCount = workOrders.filter(o => isOverdue(o.due_date, o.status)).length;
+    const overdueCount = workOrders.filter(o => isOverdue(o.due_date, o.status)).length; // Compte le nombre d'OT en retard
 
+    // Calcul du temps moyen mis par le technicien pour clore une tâche
     const closedWithDates = workOrders.filter(
         o => (o.status === 'done' || o.status === 'closed') && o.closed_at && o.created_at
     );
@@ -91,7 +99,7 @@ export default function TechnicianDashboard() {
         }, 0) / closedWithDates.length).toFixed(1)
         : '—';
 
-    // ── Formatting Helper ──
+    // Formate proprement la durée en minutes ou en heures pour l'affichage
     const formatDuration = (hours: number) => {
         if (!hours || hours <= 0) return '—';
         if (hours < 1) {
@@ -104,7 +112,7 @@ export default function TechnicianDashboard() {
     return (
         <div className="animate-in fade-in slide-in-from-bottom-4 duration-700 space-y-8 pb-10">
 
-            {/* ── Header ── */}
+            {/* ── A. EN-TÊTE DU TECHNICIEN CONNECTÉ ── */}
             <header className="page-header px-2">
                 <div>
                     <h1 className="text-3xl font-black bg-gradient-to-r from-white to-slate-400 bg-clip-text text-transparent tracking-tight">
@@ -114,7 +122,7 @@ export default function TechnicianDashboard() {
                         GMAO Technicien — Accès direct
                     </p>
 
-                    {/* Greeting — nom + ID */}
+                    {/* Badge affichant le nom et l'ID unique de l'utilisateur pour le jury */}
                     {(userName || userId) && (
                         <div className="flex items-center gap-2 mt-3">
                             <div className="flex items-center gap-2 bg-slate-900 border border-white/5 px-3 py-1.5 rounded-xl">
@@ -144,7 +152,7 @@ export default function TechnicianDashboard() {
                 </div>
             </header>
 
-            {/* ── KPIs ── */}
+            {/* ── B. GRILLE DE CARTES KPI DE FIABILITÉ ET RÉACTIVITÉ ── */}
             {isLoading || !techKpis || Array.isArray(techKpis) ? (
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                     {[1, 2, 3].map(i => (
@@ -153,6 +161,7 @@ export default function TechnicianDashboard() {
                 </div>
             ) : (
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    {/* KPI 1 : Réactivité (temps moyen de prise en charge d'un bon de travail) */}
                     <KPICard 
                         label="Réactivité" 
                         value={formatDuration(techKpis?.avg_intervention_delay_hours)} 
@@ -160,6 +169,7 @@ export default function TechnicianDashboard() {
                         color="emerald" 
                         icon={CheckCircle} 
                     />
+                    {/* KPI 2 : Nombre d'OT complétés par ce technicien */}
                     <KPICard 
                         label="OT Complétés" 
                         value={techKpis?.closed_work_orders ?? 0} 
@@ -167,6 +177,7 @@ export default function TechnicianDashboard() {
                         color="rose" 
                         icon={AlertTriangle} 
                     />
+                    {/* KPI 3 : Temps moyen passé par intervention de réparation */}
                     <KPICard 
                         label="Délai moyen" 
                         value={formatDuration(techKpis?.avg_time_spent_hours)} 
@@ -177,10 +188,10 @@ export default function TechnicianDashboard() {
                 </div>
             )}
 
-            {/* ── Calendrier + Top 5 ── */}
+            {/* ── C. WIDGETS DU CALENDRIER ET LE TOP 5 DES URGENCES DU TECHNICIEN ── */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                <CalendarWidget workOrders={workOrders} />
-                <Top5Widget workOrders={workOrders} />
+                <CalendarWidget workOrders={workOrders} /> {/* Vue mensuelle interactive des pannes à traiter */}
+                <Top5Widget workOrders={workOrders} /> {/* Les 5 plus urgentes avec statut 'open' ou 'in_progress' */}
             </div>
 
         </div>

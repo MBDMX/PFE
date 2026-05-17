@@ -1,34 +1,39 @@
-'use client';
+'use client'; // Indique à Next.js que ce fichier s'exécute côté navigateur (composant dynamique interactif)
 
-import { useState, useEffect } from 'react';
-import { Warehouse, LayoutDashboard, ClipboardList, History, Bell, ScanLine } from 'lucide-react';
-import MagDashboard from './_components/MagDashboard';
-import RequestManager from './_components/RequestManager';
-import Traceability from './_components/Traceability';
-import PdaScanner from './_components/PdaScanner';
+import { useState, useEffect } from 'react'; // Gestion des états React et cycle de vie
+import { Warehouse, LayoutDashboard, ClipboardList, History, Bell, ScanLine } from 'lucide-react'; // Icônes visuelles
+// Importation des sous-modules du magasin
+import MagDashboard from './_components/MagDashboard'; // Tableau de bord du magasinier
+import RequestManager from './_components/RequestManager'; // Validations de demandes de pièces
+import Traceability from './_components/Traceability'; // Suivi des mouvements de stock
+import PdaScanner from './_components/PdaScanner'; // Scanner PDA en direct (caméra)
 import { gmaoApi } from '../../../services/api';
 import NotificationCenter from '../../../components/ui/NotificationCenter';
 
 type TabType = 'dashboard' | 'requests' | 'history' | 'scanner';
 
 export default function MagasinierPage() {
-    const [activeTab, setActiveTab] = useState<TabType>('dashboard');
-    const [pendingCount, setPendingCount] = useState(0);
+    const [activeTab, setActiveTab] = useState<TabType>('dashboard'); // Onglet actif (par défaut 'dashboard')
+    const [pendingCount, setPendingCount] = useState(0); // Nombre de demandes de pièces en attente de validation
 
+    // 📡 POLLING RÉSEAU AUTOMATIQUE (Toutes les 5 secondes) :
+    // Interroge le serveur en tâche de fond pour afficher le nombre de demandes en attente en temps réel
     useEffect(() => {
         const fetchCount = () => {
             const token = localStorage.getItem('token');
             if (token) {
+                // Requête HTTP GET vers FastAPI pour compter les demandes de pièces "pending"
                 fetch(`http://${window.location.hostname}:5000/api/parts-requests/pending-count`, {
                     headers: { Authorization: `Bearer ${token}` }
                 }).then(r => r.json()).then(d => { if (d.count !== undefined) setPendingCount(d.count); }).catch(() => { });
             }
         };
         fetchCount();
-        const interval = setInterval(fetchCount, 5000); // 5 sec poll while on page
-        return () => clearInterval(interval);
+        const interval = setInterval(fetchCount, 5000); // Lancement toutes les 5000ms (5s)
+        return () => clearInterval(interval); // Nettoie le timer si le magasinier quitte la page
     }, []);
 
+    // Configuration des onglets avec leurs icônes Lucide correspondantes
     const tabs = [
         { id: 'dashboard', label: 'Dashboard',        icon: LayoutDashboard },
         { id: 'requests',  label: 'Demandes Pièces',   icon: ClipboardList    },
@@ -37,7 +42,7 @@ export default function MagasinierPage() {
 
     return (
         <div className="flex flex-col gap-8 pb-12 animate-in fade-in slide-in-from-bottom-4 duration-700">
-            {/* ── Header ── */}
+            {/* ── 1. EN-TÊTE : MAGASIN CENTRAL & RÔLE MAGASINIER ── */}
             <header className="page-header px-2">
                 <div>
                     <h1 className="text-3xl font-black bg-gradient-to-r from-white to-slate-400 bg-clip-text text-transparent tracking-tight">
@@ -52,13 +57,15 @@ export default function MagasinierPage() {
                         <Warehouse size={16} className="text-amber-400" />
                         <span className="text-[0.65rem] font-bold text-amber-400 uppercase tracking-widest">Magasinier</span>
                     </div>
+                    {/* Centre de notifications affichant le nombre de demandes en attente */}
                     <NotificationCenter count={pendingCount} role="magasinier" />
                 </div>
             </header>
 
-            {/* ── Toolbar Row ── */}
+            {/* ── 2. BARRE D'OUTILS ET DE NAVIGATION DES ONGLETS ── */}
             <div className="relative flex items-center justify-between px-2 -mb-2">
-                {/* ── Tab Selector ── */}
+                
+                {/* Sélecteur d'onglets (Dashboard, Demandes, Traçabilité) */}
                 <div className="flex items-center gap-1 p-1 bg-slate-950/50 backdrop-blur-md rounded-2xl border border-white/5 w-fit">
                     {tabs.map((tab) => (
                         <button
@@ -71,8 +78,9 @@ export default function MagasinierPage() {
                         >
                             <tab.icon size={14} />
                             {tab.label}
+                            {/* Affiche une bulle de notification rouge avec le compte si > 0 sur l'onglet 'requests' */}
                             {tab.id === 'requests' && pendingCount > 0 && (
-                                <span className="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-rose-500 text-[10px] text-white">
+                                <span className="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-rose-500 text-[10px] text-white font-bold">
                                     {pendingCount}
                                 </span>
                             )}
@@ -80,7 +88,7 @@ export default function MagasinierPage() {
                     ))}
                 </div>
 
-                {/* ── PDA Scanner Shortcut ── */}
+                {/* ── Bouton d'accès rapide au scanner PDA de codes-barres ── */}
                 <div className="flex items-center gap-2">
                     <button 
                         onClick={() => setActiveTab('scanner')}
@@ -97,15 +105,15 @@ export default function MagasinierPage() {
                 </div>
             </div>
 
-            {/* ── Tab Content ── */}
+            {/* ── 3. AFFICHAGE DYNAMIQUE DU CONTENU DE L'ONGLET SÉLECTIONNÉ ── */}
             <div className="px-1 min-h-[60vh]">
-                {activeTab === 'dashboard' && <MagDashboard />}
-                {activeTab === 'requests'  && <RequestManager />}
-                {activeTab === 'history'   && <Traceability />}
-                {activeTab === 'scanner'   && <PdaScanner />}
+                {activeTab === 'dashboard' && <MagDashboard />} {/* Statistiques des stocks */}
+                {activeTab === 'requests'  && <RequestManager />} {/* Acceptations / Refus de pièces demandées par les techniciens */}
+                {activeTab === 'history'   && <Traceability />} {/* Historique complet des entrées / sorties de stock */}
+                {activeTab === 'scanner'   && <PdaScanner />} {/* Lecteur de code-barres / Caméra en direct */}
             </div>
 
-            {/* ── Footer / Status ── */}
+            {/* ── 4. PIED DE PAGE : INDICATEUR DE STATUT RÉSEAU ET USINE ── */}
             <footer className="mt-8 pt-8 border-t border-white/5 flex flex-col sm:flex-row items-center justify-between gap-4 px-4 text-[0.6rem] font-bold text-slate-600 uppercase tracking-widest">
                 <div className="flex items-center gap-4">
                     <div className="flex items-center gap-2">

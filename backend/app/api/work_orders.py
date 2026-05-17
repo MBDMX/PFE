@@ -11,6 +11,23 @@ from app.schemas.schemas import WorkOrder as WorkOrderSchema, WorkOrderCreate, W
 from app.core.websocket import manager
 from app.sap.client import sap_client
 
+"""
+🎓 JOUR 1 : GESTION DES INTERVENTIONS (WORK ORDERS) - BACKEND & SAP INTEGRATION
+Ce fichier est le contrôleur API (FastAPI Router) qui régit les Ordres de Travail (OT).
+
+Concepts majeurs à valoriser lors de ta soutenance technique :
+1. Ordonnancement intelligent (Load Balancing) : `get_least_busy_technician`
+   Recherche en temps réel du technicien ayant la charge de travail la plus faible pour lui affecter automatiquement les nouveaux OTs.
+
+2. Architecture de Synchronisation Hybride (SAP ProcessForce) : `sync_work_orders_from_sap`
+   - Récupère les "MaintenanceOrders" de SAP à l'aide de requêtes OData non bloquantes (exécutées via run_in_threadpool).
+   - Mappe les statuts et priorités et crée automatiquement les équipements (machines) inexistants localement.
+   - Analyse automatique de panne (IA par mots-clés) pour extraire le code de problème (`extracted_cause`) à partir de la description textuelle brute.
+
+3. Génération dynamique de Rapports Certifiés (Rapport PDF) : `generate_wo_report`
+   Permet d'exporter des comptes-rendus complets au format PDF (calcul de temps précis en "Xh Ymin Zs", pièces détachées consommées, signatures).
+"""
+
 router = APIRouter(prefix="/work-orders", tags=["work-orders"])
 
 async def get_least_busy_technician(db: Prisma):

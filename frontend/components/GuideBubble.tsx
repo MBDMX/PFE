@@ -86,23 +86,34 @@ export default function GuideBubble() {
             let left = 0;
 
             if (step.position === 'bottom') {
-                top = rect.bottom + window.scrollY + 20;
-                left = rect.left + window.scrollX + (rect.width / 2) - 175;
+                top = rect.bottom + 20;
+                left = rect.left + (rect.width / 2) - 175;
             } else if (step.position === 'top') {
-                top = rect.top + window.scrollY - 180;
-                left = rect.left + window.scrollX + (rect.width / 2) - 175;
+                top = rect.top - 180;
+                left = rect.left + (rect.width / 2) - 175;
             } else if (step.position === 'right') {
-                top = rect.top + window.scrollY + (rect.height / 2) - 60;
-                left = rect.right + window.scrollX + 25;
+                top = rect.top + (rect.height / 2) - 60;
+                left = rect.right + 25;
             } else if (step.position === 'left') {
-                top = rect.top + window.scrollY + (rect.height / 2) - 60;
-                left = rect.left + window.scrollX - 375;
+                top = rect.top + (rect.height / 2) - 60;
+                left = rect.left - 375;
             }
+
+            // Empêcher la bulle de sortir de l'écran
+            left = Math.max(10, Math.min(left, window.innerWidth - 370));
+            top = Math.max(10, Math.min(top, window.innerHeight - 250));
 
             setCoords({ top, left });
             setIsVisible(true);
         } else {
-            setIsVisible(false);
+            // Auto-skip to next step if target element is not in DOM
+            const nextIndex = index + 1;
+            if (nextIndex < steps.length) {
+                setCurrentStepIndex(nextIndex);
+                updatePosition(nextIndex);
+            } else {
+                setIsVisible(false);
+            }
         }
     };
 
@@ -148,7 +159,7 @@ export default function GuideBubble() {
 
             {isVisible && steps.length > 0 && (
                 <div 
-                    className="fixed z-[999] w-[350px] azure-card p-6 border-blue-500/50 bg-slate-950/95 backdrop-blur-3xl shadow-[0_40px_80px_rgba(0,0,0,0.8)] animate-in zoom-in-90 duration-300 ring-1 ring-white/10"
+                    className="fixed z-[9998] w-[350px] azure-card p-6 border-blue-500/50 bg-slate-950/95 backdrop-blur-3xl shadow-[0_40px_80px_rgba(0,0,0,0.8)] animate-in zoom-in-90 duration-300 ring-1 ring-white/10"
                     style={{ top: coords.top, left: coords.left }}
                 >
                     <div className="flex items-start justify-between mb-4">
@@ -185,23 +196,34 @@ export default function GuideBubble() {
                             </button>
                             <button 
                                 onClick={handleNext}
-                                className="flex items-center gap-2 px-6 py-3 bg-blue-600 hover:bg-blue-500 rounded-xl text-white text-xs font-black uppercase tracking-widest transition-all shadow-lg shadow-blue-600/30 active:scale-95"
+                                className="flex items-center justify-center px-5 py-2.5 bg-blue-600 hover:bg-blue-500 rounded-xl text-white text-xs font-black uppercase tracking-widest transition-all shadow-lg shadow-blue-600/30 active:scale-95 min-w-[60px]"
                             >
-                                {currentStepIndex === steps.length - 1 ? 'OK' : 'Suivant'}
-                                <ChevronRight size={16} />
+                                OK
                             </button>
                         </div>
                     </div>
 
-                    {/* Triangle indicator */}
-                    <div 
-                        className={`absolute size-4 bg-slate-950 rotate-45 border-l border-t border-blue-500/50 ${
-                            currentStep.position === 'bottom' ? '-top-2 left-1/2 -translate-x-1/2' : 
-                            currentStep.position === 'top' ? '-bottom-2 left-1/2 -translate-x-1/2' :
-                            currentStep.position === 'right' ? '-left-2 top-10' : 
-                            currentStep.position === 'left' ? '-right-2 top-10' : ''
-                        }`}
-                    />
+                    {/* Flèches vectorielles premium pointant vers la cible */}
+                    {currentStep.position === 'bottom' && (
+                        <svg className="absolute -top-[9px] left-1/2 -translate-x-1/2 w-4 h-[10px]" viewBox="0 0 16 10">
+                            <path d="M8 0L16 10H0L8 0Z" fill="#020617" stroke="rgba(59, 130, 246, 0.5)" strokeWidth="1.5" />
+                        </svg>
+                    )}
+                    {currentStep.position === 'top' && (
+                        <svg className="absolute -bottom-[9px] left-1/2 -translate-x-1/2 w-4 h-[10px]" viewBox="0 0 16 10">
+                            <path d="M8 10L0 0H16L8 10Z" fill="#020617" stroke="rgba(59, 130, 246, 0.5)" strokeWidth="1.5" />
+                        </svg>
+                    )}
+                    {currentStep.position === 'right' && (
+                        <svg className="absolute -left-[9px] top-[40px] w-[10px] h-4" viewBox="0 0 10 16">
+                            <path d="M0 8L10 0V16L0 8Z" fill="#020617" stroke="rgba(59, 130, 246, 0.5)" strokeWidth="1.5" />
+                        </svg>
+                    )}
+                    {currentStep.position === 'left' && (
+                        <svg className="absolute -right-[9px] top-[40px] w-[10px] h-4" viewBox="0 0 10 16">
+                            <path d="M10 8L0 16V0L10 8Z" fill="#020617" stroke="rgba(59, 130, 246, 0.5)" strokeWidth="1.5" />
+                        </svg>
+                    )}
                 </div>
             )}
         </>

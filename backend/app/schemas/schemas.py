@@ -37,7 +37,8 @@ class TokenRefreshRequest(BaseModel):
     refresh_token: str
 
 class MachineBase(BaseModel):
-    name: str; reference: str; location: str; status: str; health_score: int
+    name: str; reference: str; location: str; status: str
+    health_score: Optional[int] = 100
     last_maintenance_date: Optional[str] = None
     next_maintenance_date: Optional[str] = None
     maintenance_frequency_days: Optional[int] = 90
@@ -55,6 +56,7 @@ class StockBase(BaseModel):
     image: Optional[str] = None
     synonyms: Optional[str] = None
     unit_price: Optional[float] = 0.0
+    category: Optional[str] = None
 
 class Stock(StockBase):
     id: int

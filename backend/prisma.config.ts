@@ -1,8 +1,2 @@
-import { defineConfig } from '@prisma/config';
-
-export default defineConfig({
-  earlyAccess: true,
-  datasource: {
-    url: process.env.DATABASE_URL,
-  },
-});
+// Prisma configuration - simplified for compatibility
+// The @prisma/config package is not installed, using env directly

@@ -24,14 +24,14 @@ async def execute_seed_data(db: Prisma):
         
         # 3. Stock
         await db.stock.create_many(data=[
-            {"name": "Courroie trapézoïdale B47", "reference": "CT-B47", "quantity": 12, "unit": "unité", "location": "Rayon A1", "image": "/pieces/courroie.png", "synonyms": "belt, bande, courroie moteur, trapeze belt"},
-            {"name": "Roulement à billes SKF 6205", "reference": "SKF-6205", "quantity": 8, "unit": "unité", "location": "Rayon B2", "image": "/pieces/roulement.png", "synonyms": "bearing, palier, roulement moteur, ball bearing"},
-            {"name": "Filtre à huile hydraulique", "reference": "FH-HYD-100", "quantity": 25, "unit": "unité", "location": "Rayon C1", "image": "/pieces/filtre.png", "synonyms": "oil filter, filtre, cartouche huile, hydraulic filter"},
-            {"name": "Joint torique NBR 50x3mm", "reference": "JT-NBR-50", "quantity": 150, "unit": "unité", "location": "Rayon A3", "image": "/pieces/joint.png", "synonyms": "o-ring, joint caoutchouc, seal, bague étanchéité"},
-            {"name": "Vérin pneumatique FESTO", "reference": "VP-FESTO-32", "quantity": 4, "unit": "unité", "location": "Rayon D1", "image": "", "synonyms": "cylinder, piston, vérin air, pneumatic actuator"},
-            {"name": "Graisse industrielle Mobilux", "reference": "GR-MOB-EP2", "quantity": 18, "unit": "kg", "location": "Rayon C3", "image": "", "synonyms": "grease, lubrifiant, graissage, lubrication"},
-            {"name": "Capteur inductif M12 PNP", "reference": "CI-M12-PNP", "quantity": 15, "unit": "unité", "location": "Rayon E2", "image": "", "synonyms": "sensor, détecteur, proximity, capteur approche"},
-            {"name": "Relais thermique Schneider", "reference": "RT-SCH-6A", "quantity": 6, "unit": "unité", "location": "Rayon E1", "image": "", "synonyms": "thermal relay, protection moteur, overload, disjoncteur thermique"},
+            {"name": "Courroie trapézoïdale B47", "reference": "CT-B47", "quantity": 12, "unit": "unité", "location": "Rayon A1", "image": "/pieces/courroie.png", "synonyms": "belt, bande, courroie moteur, trapeze belt", "unit_price": 18.50},
+            {"name": "Roulement à billes SKF 6205", "reference": "SKF-6205", "quantity": 8, "unit": "unité", "location": "Rayon B2", "image": "/pieces/roulement.png", "synonyms": "bearing, palier, roulement moteur, ball bearing", "unit_price": 34.20},
+            {"name": "Filtre à huile hydraulique", "reference": "FH-HYD-100", "quantity": 25, "unit": "unité", "location": "Rayon C1", "image": "/pieces/filtre.png", "synonyms": "oil filter, filtre, cartouche huile, hydraulic filter", "unit_price": 28.00},
+            {"name": "Joint torique NBR 50x3mm", "reference": "JT-NBR-50", "quantity": 150, "unit": "unité", "location": "Rayon A3", "image": "/pieces/joint.png", "synonyms": "o-ring, joint caoutchouc, seal, bague étanchéité", "unit_price": 8.90},
+            {"name": "Vérin pneumatique FESTO", "reference": "VP-FESTO-32", "quantity": 4, "unit": "unité", "location": "Rayon D1", "image": "", "synonyms": "cylinder, piston, vérin air, pneumatic actuator", "unit_price": 185.00},
+            {"name": "Graisse industrielle Mobilux", "reference": "GR-MOB-EP2", "quantity": 18, "unit": "kg", "location": "Rayon C3", "image": "", "synonyms": "grease, lubrifiant, graissage, lubrication", "unit_price": 22.00},
+            {"name": "Capteur inductif M12 PNP", "reference": "CI-M12-PNP", "quantity": 15, "unit": "unité", "location": "Rayon E2", "image": "", "synonyms": "sensor, détecteur, proximity, capteur approche", "unit_price": 95.00},
+            {"name": "Relais thermique Schneider", "reference": "RT-SCH-6A", "quantity": 6, "unit": "unité", "location": "Rayon E1", "image": "", "synonyms": "thermal relay, protection moteur, overload, disjoncteur thermique", "unit_price": 42.50},
         ])
         # 4. Work Orders (History for KPIs)
         await db.workorder.create_many(data=[
